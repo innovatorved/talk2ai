@@ -1,96 +1,101 @@
-import { SAMPLE_RATE } from './constants.js';
-import { formatDate } from './utils.js';
-// Create WebSocket connection.
+import { moonshot } from './moonshot/index.js';
+import { wav2AudioBuff } from './utils.js';
+import * as tts from 'https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.4/+esm';
+import asyncIterator from 'https://cdn.jsdelivr.net/npm/@cokoghenun/async-iterator@1.0.3/+esm';
+
 const socket = new WebSocket('ws://localhost:8787/websocket');
 // Connection opened
 socket.addEventListener('open', (event) => {
-	socket.send('Hello Server!');
+	// socket.send('Hello Server!');
 });
-// Listen for messages
-socket.addEventListener('message', (event) => {
-	console.log('Message from server ', event.data);
+
+let source;
+let audioCtx;
+let channels = 2;
+const sounds = [];
+let isCurrentSoundDonePlaying = true;
+
+function newSoundQueued() {
+	if (isCurrentSoundDonePlaying) {
+		isCurrentSoundDonePlaying = false;
+		wav2AudioBuff(sounds.shift(), (audioBuffer) => {
+			source = audioCtx.createBufferSource();
+			source.buffer = audioBuffer;
+			source.connect(audioCtx.destination);
+			source.start();
+
+			source.onended = () => {
+				console.log('done playing');
+				isCurrentSoundDonePlaying = true;
+			};
+		});
+	} else {
+		setTimeout(newSoundQueued, 1000);
+	}
+}
+
+async function textToSound(text) {
+	console.log(text);
+	const sound = await tts.predict({
+		text: text,
+		voiceId: 'en_GB-cori-medium',
+		// voiceId: 'en_US-hfc_female-medium',
+	});
+
+	// console.log(await tts.stored());
+	// console.log(await tts.voices());
+
+	console.log('sound processed');
+	sounds.push(sound);
+	newSoundQueued();
+	isDoneProcessingForemostText = true;
+}
+const textQueue = [];
+let isDoneProcessingForemostText = true;
+async function processTextQueue() {
+	if (isDoneProcessingForemostText) {
+		isDoneProcessingForemostText = false;
+		await textToSound(textQueue.shift());
+	} else {
+		setTimeout(processTextQueue, 1000);
+	}
+}
+socket.addEventListener('message', async (event) => {
+	const data = JSON.parse(event.data);
+	switch (data.type) {
+		case 'audio':
+			audio.src = 'data:audio/wav;base64,' + LZString.decompress(data.audio);
+			audio.play();
+			break;
+		case 'text':
+			// const sentences = data.text.replace(/[\n\r\t]/gm, '').match(/\(?[^\.\?\!]+[\.!\?]\)?/g);
+			// await sentencesToSound(sentences);
+			// await sentencesToSound([data.text]);
+			textQueue.push(data.text);
+			await processTextQueue();
+
+			break;
+		default:
+			break;
+	}
 });
 
 async function init() {
-	const worker = new Worker('worker.js', { type: 'module' });
+	audioCtx = new AudioContext();
 	const resultsContainer = document.getElementById('recognition-result');
 	const partialContainer = document.getElementById('partial');
 
-	const onError = (error) => console.log(error);
-	const onMessage = async ({ data }) => {
-		if (data.error) {
-			return onError(data.error);
-		}
-		if (data.type === 'status') {
-			partialContainer.textContent = data.message;
-			// console.log(data.message);
-		} else {
-			const newSpan = document.createElement('div');
-			newSpan.textContent = `${data.message} `;
-			resultsContainer.insertBefore(newSpan, partialContainer);
-			socket.send(data.message);
-			console.log(data.message);
-		}
-	};
-	worker.addEventListener('message', onMessage);
-	worker.addEventListener('error', onError);
-	await next(worker);
-}
-async function next(worker) {
-	const audioStream = navigator.mediaDevices.getUserMedia({
-		audio: {
-			channelCount: 1,
-			echoCancellation: true,
-			autoGainControl: true,
-			noiseSuppression: true,
-			sampleRate: SAMPLE_RATE,
-		},
-	});
-
-	let worklet;
-	let audioContext;
-	let source;
-
-	audioStream
-		.then(async (stream) => {
-			audioContext = new (window.AudioContext || window.webkitAudioContext)({
-				sampleRate: SAMPLE_RATE,
-				latencyHint: 'interactive',
-			});
-
-			const analyser = audioContext.createAnalyser();
-			analyser.fftSize = 32;
-
-			// NOTE: In Firefox, the following line may throw an error:
-			// "AudioContext.createMediaStreamSource: Connecting AudioNodes from AudioContexts with different sample-rate is currently not supported."
-			// See the following bug reports for more information:
-			//  - https://bugzilla.mozilla.org/show_bug.cgi?id=1674892
-			//  - https://bugzilla.mozilla.org/show_bug.cgi?id=1674892
-			source = audioContext.createMediaStreamSource(stream);
-			source.connect(analyser);
-
-			await audioContext.audioWorklet.addModule('./processor.js');
-
-			worklet = new AudioWorkletNode(audioContext, 'vad-processor', {
-				numberOfInputs: 1,
-				numberOfOutputs: 0,
-				channelCount: 1,
-				channelCountMode: 'explicit',
-				channelInterpretation: 'discrete',
-			});
-
-			source.connect(worklet);
-
-			worklet.port.onmessage = (event) => {
-				const { buffer } = event.data;
-
-				// Dispatch buffer for voice activity detection
-				worker.postMessage({ buffer });
-			};
-		})
-		.catch((err) => {
-			console.error(err);
-		});
+	function onTranscription(msg) {
+		const newSpan = document.createElement('div');
+		newSpan.textContent = `${msg} `;
+		resultsContainer.insertBefore(newSpan, partialContainer);
+		socket.send(msg);
+	}
+	function onStatus(msg) {
+		partialContainer.textContent = msg;
+	}
+	moonshot(onStatus, onTranscription);
 }
 
-window.onload = init;
+window.init = init;
+// window.onload = init;

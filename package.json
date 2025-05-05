@@ -12,5 +12,12 @@
 		"@cloudflare/workers-types": "^4.20250319.0",
 		"typescript": "^5.5.2",
 		"wrangler": "^4.2.0"
+	},
+	"dependencies": {
+		"@mintplex-labs/piper-tts-web": "^1.0.4",
+		"ai": "^4.2.0",
+		"lz-string": "^1.5.0",
+		"piper-tts-web": "^1.1.1",
+		"workers-ai-provider": "^0.2.0"
 	}
 }

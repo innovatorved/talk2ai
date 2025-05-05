@@ -1,4 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
+import { createWorkersAI } from 'workers-ai-provider';
+import { generateText, streamText } from 'ai';
+import Lz from 'lz-string';
 /* Todo
  * ✅ 1. WS with frontend
  * ✅ 2. Get audio to backend
@@ -14,14 +17,61 @@ export class MyDurableObject extends DurableObject {
 		super(ctx, env);
 	}
 
-	async fetch(request) {
+	async fetch(request: any) {
 		const webSocketPair = new WebSocketPair();
 		const [client, server] = Object.values(webSocketPair);
 
 		server.accept();
+		const workersai = createWorkersAI({ binding: this.env.AI });
+		const model = workersai('@cf/meta/llama-3.3-70b-instruct-fp8-fast');
 
-		server.addEventListener('message', (event) => {
-			console.log(event.data);
+		server.addEventListener('message', async (event) => {
+			console.log('>> ' + event.data);
+			const messages = [
+				{ role: 'system', content: 'You in a voice conversation' },
+				{ role: 'user', content: event.data },
+			];
+
+			const { textStream } = streamText({
+				model,
+				messages,
+			});
+
+			let buffer = '';
+
+			for await (const textPart of textStream) {
+				buffer += textPart;
+
+				// Match sentences ending with ., !, or ? followed by a space or end of string
+				const sentenceRegex = /([^\r\n.?!]*[.?!])(\s|$)/g;
+				let match;
+				let lastIndex = 0;
+
+				while ((match = sentenceRegex.exec(buffer)) !== null) {
+					const sentence = buffer.slice(lastIndex, sentenceRegex.lastIndex).trim();
+					if (sentence) {
+						console.log('>>', sentence);
+						server.send(JSON.stringify({ type: 'text', text: sentence }));
+					}
+					lastIndex = sentenceRegex.lastIndex;
+				}
+
+				// Keep only the unfinished part in the buffer
+				buffer = buffer.slice(lastIndex);
+			}
+
+			// const result = await generateText({
+			// 	model,
+			// 	messages,
+			// });
+			//
+			// server.send(JSON.stringify({ type: 'text', text: result.text }));
+
+			// const audio = await this.env.AI.run('@cf/myshell-ai/melotts', {
+			// 	prompt: result.text,
+			// });
+			// // console.log(audio);
+			// server.send(JSON.stringify({ type: 'audio', audio: Lz.compress(audio.audio) }));
 		});
 
 		server.addEventListener('close', (cls) => {
