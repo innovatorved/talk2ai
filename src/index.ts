@@ -38,9 +38,15 @@ export class MyDurableObject extends DurableObject {
 				messages,
 			});
 
-			await bufferText(textStream, (sentence: string) => {
+			await bufferText(textStream, async (sentence: string) => {
+				// server.send(JSON.stringify({ type: 'text', text: sentence }));
+
+				const audio = await this.env.AI.run('@cf/myshell-ai/melotts', {
+					prompt: sentence,
+				});
 				console.log('>>', sentence);
-				server.send(JSON.stringify({ type: 'text', text: sentence }));
+				server.send(JSON.stringify({ type: 'audio', text: sentence, audio: audio.audio }));
+				// server.send(JSON.stringify({ type: 'audio', audio: Lz.compress(audio.audio) }));
 			});
 
 			// const result = await generateText({
@@ -49,12 +55,6 @@ export class MyDurableObject extends DurableObject {
 			// });
 			//
 			// server.send(JSON.stringify({ type: 'text', text: result.text }));
-
-			// const audio = await this.env.AI.run('@cf/myshell-ai/melotts', {
-			// 	prompt: result.text,
-			// });
-			// // console.log(audio);
-			// server.send(JSON.stringify({ type: 'audio', audio: Lz.compress(audio.audio) }));
 		});
 
 		server.addEventListener('close', (cls) => {

@@ -1,12 +1,3 @@
-export function wav2AudioBuff(wav, callBack) {
-	const audioContext = new AudioContext();
-	const fileReader = new FileReader();
-
-	fileReader.onloadend = () => {
-		const arrayBuffer = fileReader.result;
-		audioContext.decodeAudioData(arrayBuffer, (audioBuffer) => {
-			callBack(audioBuffer);
-		});
-	};
-	fileReader.readAsArrayBuffer(wav);
+export function base64ToArrBuff(base64) {
+	return Uint8Array.from(atob(base64.shift()), (c) => c.charCodeAt(0)).buffer;
 }

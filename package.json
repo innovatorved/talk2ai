@@ -14,6 +14,7 @@
 		"wrangler": "^4.2.0"
 	},
 	"dependencies": {
+		"@cokoghenun/async-iterator": "^1.0.3",
 		"@mintplex-labs/piper-tts-web": "^1.0.4",
 		"ai": "^4.2.0",
 		"lz-string": "^1.5.0",
