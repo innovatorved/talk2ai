@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { createWorkersAI } from 'workers-ai-provider';
 import { generateText, streamText } from 'ai';
 import Lz from 'lz-string';
+import { bufferText } from './utils';
 /* Todo
  * ✅ 1. WS with frontend
  * ✅ 2. Get audio to backend
@@ -37,28 +38,10 @@ export class MyDurableObject extends DurableObject {
 				messages,
 			});
 
-			let buffer = '';
-
-			for await (const textPart of textStream) {
-				buffer += textPart;
-
-				// Match sentences ending with ., !, or ? followed by a space or end of string
-				const sentenceRegex = /([^\r\n.?!]*[.?!])(\s|$)/g;
-				let match;
-				let lastIndex = 0;
-
-				while ((match = sentenceRegex.exec(buffer)) !== null) {
-					const sentence = buffer.slice(lastIndex, sentenceRegex.lastIndex).trim();
-					if (sentence) {
-						console.log('>>', sentence);
-						server.send(JSON.stringify({ type: 'text', text: sentence }));
-					}
-					lastIndex = sentenceRegex.lastIndex;
-				}
-
-				// Keep only the unfinished part in the buffer
-				buffer = buffer.slice(lastIndex);
-			}
+			await bufferText(textStream, (sentence: string) => {
+				console.log('>>', sentence);
+				server.send(JSON.stringify({ type: 'text', text: sentence }));
+			});
 
 			// const result = await generateText({
 			// 	model,
