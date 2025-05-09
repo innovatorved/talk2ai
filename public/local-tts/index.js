@@ -2,7 +2,7 @@ import { SAMPLE_RATE } from './constants.js';
 import { formatDate } from './utils.js';
 
 const PATH = '/local-tts';
-export function moonshot(onStatus, onTranscription) {
+export function moonshot(onTranscription, onStatus) {
 	const worker = new Worker(PATH + '/worker.js', { type: 'module' });
 
 	const onError = (error) => console.log(error);
@@ -11,8 +11,6 @@ export function moonshot(onStatus, onTranscription) {
 
 		switch (data.type) {
 			case 'status':
-				onStatus(data.message);
-				break;
 			case 'info':
 				onStatus(data.message);
 				break;

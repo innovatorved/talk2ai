@@ -1,70 +1,62 @@
+import { streamText } from 'ai';
+import { bufferText } from './utils';
 import { DurableObject } from 'cloudflare:workers';
 import { createWorkersAI } from 'workers-ai-provider';
-import { generateText, streamText } from 'ai';
-import Lz from 'lz-string';
-import { bufferText } from './utils';
+
 /* Todo
  * ✅ 1. WS with frontend
  * ✅ 2. Get audio to backend
  * ✅ 3. Convert audio to text
- * 4. Run inference
- * 5. Convert result to audio
- * 6. Send audio to frontend
+ * ✅ 4. Run inference
+ * ✅ 5. Convert result to audio
+ * ✅ 6. Send audio to frontend
  */
 
-/** A Durable Object's behavior is defined in an exported Javascript class */
 export class MyDurableObject extends DurableObject {
+	env: Env;
+	msgHistory: Array<Object>;
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
+		this.env = env;
+		this.msgHistory = [];
 	}
-
 	async fetch(request: any) {
 		const webSocketPair = new WebSocketPair();
-		const [client, server] = Object.values(webSocketPair);
+		const [socket, ws] = Object.values(webSocketPair);
 
-		server.accept();
+		ws.accept();
 		const workersai = createWorkersAI({ binding: this.env.AI });
 		const model = workersai('@cf/meta/llama-3.3-70b-instruct-fp8-fast');
 
-		server.addEventListener('message', async (event) => {
-			console.log('>> ' + event.data);
-			const messages = [
-				{ role: 'system', content: 'You in a voice conversation' },
-				{ role: 'user', content: event.data },
-			];
+		ws.addEventListener('message', async (event) => {
+			console.log('>> ', event.data);
+			this.msgHistory.push({ role: 'user', content: event.data });
 
+			console.log(this.msgHistory);
 			const { textStream } = streamText({
 				model,
-				messages,
+				system: 'You in a voice conversation with the user',
+				messages: this.msgHistory as any,
 			});
 
+			// buffer streamed response into sentences, then convert to audio
 			await bufferText(textStream, async (sentence: string) => {
-				// server.send(JSON.stringify({ type: 'text', text: sentence }));
-
-				const audio = await this.env.AI.run('@cf/myshell-ai/melotts', {
+				console.log('>>', sentence);
+				this.msgHistory.push({ role: 'assistant', content: sentence });
+				const audio = await this.env.AI.run('@cf/myshell-ai/melotts' as any, {
 					prompt: sentence,
 				});
-
-				console.log('>>', sentence);
-				server.send(JSON.stringify({ type: 'audio', text: sentence, audio: audio.audio }));
-				// server.send(JSON.stringify({ type: 'audio', audio: Lz.compress(audio.audio) }));
+				ws.send(JSON.stringify({ type: 'audio', text: sentence, audio: audio.audio }));
 			});
-
-			// const result = await generateText({
-			// 	model,
-			// 	messages,
-			// });
-			//
-			// server.send(JSON.stringify({ type: 'text', text: result.text }));
 		});
 
-		server.addEventListener('close', (cls) => {
-			server.close(cls.code, 'Durable Object is closing WebSocket');
+		ws.addEventListener('close', (cls) => {
+			ws.close(cls.code, 'Durable Object is closing WebSocket');
 		});
 
 		return new Response(null, {
 			status: 101,
-			webSocket: client,
+			webSocket: socket,
 		});
 	}
 }
@@ -78,10 +70,8 @@ export default {
 					status: 426,
 				});
 			}
-
 			let id: DurableObjectId = env.MY_DURABLE_OBJECT.idFromName(new URL(request.url).pathname);
 			let stub = env.MY_DURABLE_OBJECT.get(id);
-
 			return stub.fetch(request);
 		}
 

@@ -1,4 +1,5 @@
 import { moonshot } from './local-tts/index.js';
+import { vosk } from './local-tts2/index.js';
 import { base64ToArrBuff } from './utils.js';
 import arraybufferToAudiobuffer from 'https://cdn.jsdelivr.net/npm/arraybuffer-to-audiobuffer@0.0.5/+esm';
 
@@ -6,15 +7,13 @@ const resultsContainer = document.getElementById('recognition-result');
 const partialContainer = document.getElementById('partial');
 const socket = new WebSocket(`${location.protocol == 'https:' ? 'wss' : 'ws'}://${location.host}/websocket`);
 const sounds = [];
-const audioCtx = new AudioContext();
+let audioCtx;
 
-let recognition;
 let isSpeaking = false;
 
 function speakNextSound() {
 	if (!isSpeaking) {
 		isSpeaking = true;
-		if (recognition) recognition.stop();
 		const arrayBuff = base64ToArrBuff(sounds);
 		arraybufferToAudiobuffer(arrayBuff, audioCtx).then((audioBuffer) => {
 			const source = audioCtx.createBufferSource();
@@ -23,7 +22,6 @@ function speakNextSound() {
 			source.start();
 			source.onended = () => {
 				isSpeaking = false;
-				if (recognition && !sounds.length) recognition.start();
 				console.log('done speaking');
 			};
 		});
@@ -55,29 +53,20 @@ function printSpeach(msg, type = 'input') {
 	}
 	resultsContainer.insertBefore(newSpan, partialContainer);
 }
+
 async function init() {
+	audioCtx = new AudioContext();
 	function onTranscription(msg) {
 		printSpeach(msg);
 		socket.send(msg);
 	}
 	function onStatus(msg) {
-		partialContainer.textContent = msg;
+		partialContainer.textContent = `[${msg}]`;
 	}
 
-	const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-	if (typeof SpeechRecognition !== 'undefined') {
-		recognition = new SpeechRecognition();
-		recognition.continuous = true;
-		recognition.onresult = ({ results }) => {
-			const transcript = results[results.length - 1][0].transcript;
-			onTranscription(transcript);
-		};
-		recognition.start();
-		return undefined;
-	}
-
-	moonshot(onStatus, onTranscription);
+	const isFirefox = navigator.userAgent.indexOf('Firefox') !== -1;
+	if (isFirefox) return vosk(onTranscription, onStatus);
+	moonshot(onTranscription, onStatus);
 }
 
 window.init = init;
-// window.onload = init;
