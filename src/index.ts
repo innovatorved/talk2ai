@@ -44,6 +44,7 @@ export class MyDurableObject extends DurableObject {
 				const audio = await this.env.AI.run('@cf/myshell-ai/melotts', {
 					prompt: sentence,
 				});
+
 				console.log('>>', sentence);
 				server.send(JSON.stringify({ type: 'audio', text: sentence, audio: audio.audio }));
 				// server.send(JSON.stringify({ type: 'audio', audio: Lz.compress(audio.audio) }));

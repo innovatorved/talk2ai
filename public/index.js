@@ -1,19 +1,20 @@
-import { moonshot } from './moonshot/index.js';
+import { moonshot } from './local-tts/index.js';
 import { base64ToArrBuff } from './utils.js';
-
 import arraybufferToAudiobuffer from 'https://cdn.jsdelivr.net/npm/arraybuffer-to-audiobuffer@0.0.5/+esm';
-const socket = new WebSocket('ws://localhost:8787/websocket');
 
-socket.addEventListener('open', (event) => {
-	// socket.send('Hello Server!');
-});
-
+const resultsContainer = document.getElementById('recognition-result');
+const partialContainer = document.getElementById('partial');
+const socket = new WebSocket(`ws://${window.location.host}/websocket`);
 const sounds = [];
-let isSpeaking = false;
 const audioCtx = new AudioContext();
+
+let recognition;
+let isSpeaking = false;
+
 function speakNextSound() {
 	if (!isSpeaking) {
 		isSpeaking = true;
+		if (recognition) recognition.stop();
 		const arrayBuff = base64ToArrBuff(sounds);
 		arraybufferToAudiobuffer(arrayBuff, audioCtx).then((audioBuffer) => {
 			const source = audioCtx.createBufferSource();
@@ -22,6 +23,7 @@ function speakNextSound() {
 			source.start();
 			source.onended = () => {
 				isSpeaking = false;
+				if (recognition && !sounds.length) recognition.start();
 				console.log('done speaking');
 			};
 		});
@@ -33,31 +35,47 @@ socket.addEventListener('message', async (event) => {
 	const data = JSON.parse(event.data);
 	switch (data.type) {
 		case 'audio':
-			console.log(data.text);
 			sounds.push(data.audio);
+			printSpeach(data.text, 'output');
 			speakNextSound();
-			break;
-		case 'text':
-			console.log(data.text);
 			break;
 		default:
 			break;
 	}
 });
-
+function printSpeach(msg, type = 'input') {
+	const newSpan = document.createElement('div');
+	switch (type) {
+		case 'output':
+			newSpan.textContent = `<< ${msg} `;
+			break;
+		default:
+			newSpan.textContent = `>> ${msg} `;
+			break;
+	}
+	resultsContainer.insertBefore(newSpan, partialContainer);
+}
 async function init() {
-	const resultsContainer = document.getElementById('recognition-result');
-	const partialContainer = document.getElementById('partial');
-
 	function onTranscription(msg) {
-		const newSpan = document.createElement('div');
-		newSpan.textContent = `${msg} `;
-		resultsContainer.insertBefore(newSpan, partialContainer);
+		printSpeach(msg);
 		socket.send(msg);
 	}
 	function onStatus(msg) {
 		partialContainer.textContent = msg;
 	}
+
+	const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+	if (typeof SpeechRecognition !== 'undefined') {
+		recognition = new SpeechRecognition();
+		recognition.continuous = true;
+		recognition.onresult = ({ results }) => {
+			const transcript = results[results.length - 1][0].transcript;
+			onTranscription(transcript);
+		};
+		recognition.start();
+		return undefined;
+	}
+
 	moonshot(onStatus, onTranscription);
 }
 

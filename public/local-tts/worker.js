@@ -41,7 +41,8 @@ const DEVICE_DTYPE_CONFIGS = {
 };
 const transcriber = await pipeline(
 	'automatic-speech-recognition',
-	'onnx-community/moonshine-base-ONNX', // or "onnx-community/whisper-tiny.en",
+	// 'onnx-community/moonshine-base-ONNX',
+	'onnx-community/whisper-base.en',
 	{
 		device,
 		dtype: DEVICE_DTYPE_CONFIGS[device],

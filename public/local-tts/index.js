@@ -1,26 +1,28 @@
 import { SAMPLE_RATE } from './constants.js';
 import { formatDate } from './utils.js';
 
-const PATH = '/moonshot';
+const PATH = '/local-tts';
 export function moonshot(onStatus, onTranscription) {
 	const worker = new Worker(PATH + '/worker.js', { type: 'module' });
 
 	const onError = (error) => console.log(error);
 	const onMessage = async ({ data }) => {
-		if (data.error) {
-			return onError(data.error);
-		}
-		// console.log(data);
-		if (data.type === 'status') {
-			onStatus(data.message);
-		} else if (data.type === 'info') {
-			onStatus(data.message);
-		} else {
-			onTranscription(data.message);
+		if (data.error) return onError(data.error);
+
+		switch (data.type) {
+			case 'status':
+				onStatus(data.message);
+				break;
+			case 'info':
+				onStatus(data.message);
+				break;
+			default:
+				onTranscription(data.message);
+				break;
 		}
 	};
-	worker.addEventListener('message', onMessage);
 	worker.addEventListener('error', onError);
+	worker.addEventListener('message', onMessage);
 
 	const audioStream = navigator.mediaDevices.getUserMedia({
 		audio: {
@@ -31,10 +33,6 @@ export function moonshot(onStatus, onTranscription) {
 			sampleRate: SAMPLE_RATE,
 		},
 	});
-
-	// let worklet;
-	// let audioContext;
-	// let source;
 
 	audioStream
 		.then(async (stream) => {
