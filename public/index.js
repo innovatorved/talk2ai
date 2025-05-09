@@ -4,7 +4,7 @@ import arraybufferToAudiobuffer from 'https://cdn.jsdelivr.net/npm/arraybuffer-t
 
 const resultsContainer = document.getElementById('recognition-result');
 const partialContainer = document.getElementById('partial');
-const socket = new WebSocket(`ws://${window.location.host}/websocket`);
+const socket = new WebSocket(`${location.protocol == 'https:' ? 'wss' : 'ws'}://${location.host}/websocket`);
 const sounds = [];
 const audioCtx = new AudioContext();
 
