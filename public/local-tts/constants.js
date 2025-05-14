@@ -3,6 +3,7 @@
  * Coindicentally, this is the same for both models (Moonshine and Silero VAD)
  */
 export const SAMPLE_RATE = 16000;
+// export const SAMPLE_RATE = 48000;
 export const SAMPLE_RATE_MS = SAMPLE_RATE / 1000;
 
 /**

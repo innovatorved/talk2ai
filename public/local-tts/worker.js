@@ -1,5 +1,4 @@
-import { AutoModel, Tensor, pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers';
-// import { AutoModel, Tensor, pipeline } from '@huggingface/transformers';
+import { AutoModel, Tensor } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers';
 import {
 	MAX_BUFFER_DURATION,
 	SAMPLE_RATE,
@@ -12,8 +11,6 @@ import {
 } from './constants.js';
 import { supportsWebGPU } from './utils.js';
 
-const device = (await supportsWebGPU()) ? 'webgpu' : 'wasm';
-self.postMessage({ type: 'info', message: `Using device: "${device}"` });
 self.postMessage({
 	type: 'info',
 	message: 'Loading models...',
@@ -29,30 +26,6 @@ const silero_vad = await AutoModel.from_pretrained('onnx-community/silero-vad', 
 	throw error;
 });
 
-const DEVICE_DTYPE_CONFIGS = {
-	webgpu: {
-		encoder_model: 'fp32',
-		decoder_model_merged: 'q4',
-	},
-	wasm: {
-		encoder_model: 'fp32',
-		decoder_model_merged: 'q8',
-	},
-};
-const transcriber = await pipeline(
-	'automatic-speech-recognition',
-	// 'onnx-community/moonshine-base-ONNX',
-	'onnx-community/whisper-base.en',
-	{
-		device,
-		dtype: DEVICE_DTYPE_CONFIGS[device],
-	},
-).catch((error) => {
-	self.postMessage({ error });
-	throw error;
-});
-
-await transcriber(new Float32Array(SAMPLE_RATE)); // Compile shaders
 self.postMessage({ type: 'status', status: 'ready', message: 'Ready!' });
 
 // Transformers.js currently doesn't support simultaneous inference,
@@ -98,8 +71,8 @@ async function vad(buffer) {
  * @param {Object} data Additional data
  */
 const transcribe = async (buffer, data) => {
-	const { text } = await (inferenceChain = inferenceChain.then((_) => transcriber(buffer)));
-	self.postMessage({ type: 'output', buffer, message: text, ...data });
+	console.log(buffer);
+	self.postMessage({ type: 'output', buffer, ...data });
 };
 
 // Track the number of samples after the last speech chunk

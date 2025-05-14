@@ -2,6 +2,7 @@ import { streamText } from 'ai';
 import { bufferText } from './utils';
 import { DurableObject } from 'cloudflare:workers';
 import { createWorkersAI } from 'workers-ai-provider';
+import toUint from 'base64-to-uint8array';
 
 /* Todo
  * ✅ 1. WS with frontend
@@ -29,8 +30,14 @@ export class MyDurableObject extends DurableObject {
 		const model = workersai('@cf/meta/llama-3.3-70b-instruct-fp8-fast');
 
 		ws.addEventListener('message', async (event) => {
-			console.log('>> ', event.data);
-			this.msgHistory.push({ role: 'user', content: event.data });
+			const input = {
+				audio: [...new Uint8Array(event.data as ArrayBuffer)],
+			};
+
+			const { text } = await this.env.AI.run('@cf/openai/whisper-tiny-en', input);
+			ws.send(JSON.stringify({ type: 'text', text }));
+			console.log('>> ', text);
+			this.msgHistory.push({ role: 'user', content: text });
 
 			console.log(this.msgHistory);
 			const { textStream } = streamText({

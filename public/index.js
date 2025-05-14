@@ -1,5 +1,6 @@
 import { moonshot } from './local-tts/index.js';
 import { vosk } from './local-tts2/index.js';
+import { stt } from './stt.js';
 import { base64ToArrBuff } from './utils.js';
 import arraybufferToAudiobuffer from 'https://cdn.jsdelivr.net/npm/arraybuffer-to-audiobuffer@0.0.5/+esm';
 
@@ -10,23 +11,26 @@ const sounds = [];
 let audioCtx;
 
 let isSpeaking = false;
-
+let timeOutId;
+let source;
+let activeSources = [];
 function speakNextSound() {
-	if (!isSpeaking) {
+	if (!isSpeaking && sounds.length > 0) {
 		isSpeaking = true;
-		const arrayBuff = base64ToArrBuff(sounds);
+		const arrayBuff = base64ToArrBuff(sounds.shift());
 		arraybufferToAudiobuffer(arrayBuff, audioCtx).then((audioBuffer) => {
-			const source = audioCtx.createBufferSource();
+			source = audioCtx.createBufferSource();
 			source.buffer = audioBuffer;
 			source.connect(audioCtx.destination);
 			source.start();
+			activeSources.push(source);
 			source.onended = () => {
 				isSpeaking = false;
 				console.log('done speaking');
 			};
 		});
 	} else {
-		setTimeout(speakNextSound, 1000);
+		timeOutId = setTimeout(speakNextSound, 1000);
 	}
 }
 socket.addEventListener('message', async (event) => {
@@ -37,6 +41,8 @@ socket.addEventListener('message', async (event) => {
 			printSpeach(data.text, 'output');
 			speakNextSound();
 			break;
+		case 'text':
+			printSpeach(data.text);
 		default:
 			break;
 	}
@@ -57,6 +63,16 @@ function printSpeach(msg, type = 'input') {
 async function init() {
 	audioCtx = new AudioContext();
 	function onTranscription(msg) {
+		activeSources.forEach((source) => {
+			try {
+				source.stop();
+			} catch (e) {
+				console.error('Error stopping source:', e);
+			}
+		});
+		sounds.splice(0, sounds.length);
+		if (timeOutId) clearTimeout(timeOutId);
+
 		printSpeach(msg);
 		socket.send(msg);
 	}
@@ -64,9 +80,10 @@ async function init() {
 		partialContainer.textContent = `[${msg}]`;
 	}
 
-	const isFirefox = navigator.userAgent.indexOf('Firefox') !== -1;
-	if (isFirefox) return vosk(onTranscription, onStatus);
-	moonshot(onTranscription, onStatus);
+	// await stt(socket);
+	// const isFirefox = navigator.userAgent.indexOf('Firefox') !== -1;
+	// if (isFirefox) return vosk(onTranscription, onStatus);
+	moonshot(onTranscription, onStatus, socket);
 }
 
 window.init = init;
