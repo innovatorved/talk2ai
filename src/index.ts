@@ -2,7 +2,6 @@ import { streamText } from 'ai';
 import { bufferText } from './utils';
 import { DurableObject } from 'cloudflare:workers';
 import { createWorkersAI } from 'workers-ai-provider';
-import toUint from 'base64-to-uint8array';
 
 /* Todo
  * ✅ 1. WS with frontend
@@ -39,7 +38,6 @@ export class MyDurableObject extends DurableObject {
 			console.log('>> ', text);
 			this.msgHistory.push({ role: 'user', content: text });
 
-			console.log(this.msgHistory);
 			const { textStream } = streamText({
 				model,
 				system: 'You in a voice conversation with the user',

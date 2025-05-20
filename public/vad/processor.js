@@ -2,7 +2,7 @@ const MIN_CHUNK_SIZE = 512;
 let globalPointer = 0;
 let globalBuffer = new Float32Array(MIN_CHUNK_SIZE);
 
-class VADProcessor extends AudioWorkletProcessor {
+class chunkProcessor extends AudioWorkletProcessor {
 	process(inputs, outputs, parameters) {
 		const buffer = inputs[0][0];
 		if (!buffer) return; // buffer is null when the stream ends
@@ -34,4 +34,4 @@ class VADProcessor extends AudioWorkletProcessor {
 	}
 }
 
-registerProcessor('vad-processor', VADProcessor);
+registerProcessor('chunk-processor', chunkProcessor);

@@ -1,100 +1,12 @@
-import { SAMPLE_RATE } from './constants.js';
-import { formatDate } from './utils.js';
-
-const PATH = '/local-tts';
-export function moonshot(onTranscription, onStatus, socket) {
-	const worker = new Worker(PATH + '/worker.js', { type: 'module' });
-
-	const onError = (error) => console.log(error);
-	const onMessage = async ({ data }) => {
-		if (data.error) return onError(data.error);
-
-		switch (data.type) {
-			case 'status':
-			case 'info':
-				onStatus(data.message);
-				break;
-			default:
-				const arrayBuffer = float32ArraysToWav([data.buffer], SAMPLE_RATE);
-				socket.send(arrayBuffer);
-				// const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
-				// const url = window.URL.createObjectURL(blob);
-				// const audio = new Audio();
-				// audio.src = url;
-				// audio.play();
-				// socket.send(JSON.stringify(data.message));
-				// onTranscription(data.message);
-				break;
-		}
-	};
-	worker.addEventListener('error', onError);
-	worker.addEventListener('message', onMessage);
-
-	const audioStream = navigator.mediaDevices.getUserMedia({
-		audio: {
-			channelCount: 1,
-			echoCancellation: true,
-			autoGainControl: true,
-			noiseSuppression: true,
-			sampleRate: SAMPLE_RATE,
-		},
-	});
-
-	audioStream
-		.then(async (stream) => {
-			let actualSampleRate;
-			if (stream.getAudioTracks().length > 0) {
-				const audioTrack = stream.getAudioTracks()[0];
-				const trackSettings = audioTrack.getSettings();
-				actualSampleRate = trackSettings.sampleRate;
-				console.log('Actual microphone stream sample rate:', actualSampleRate);
-			}
-			console.log({ actualSampleRate });
-
-			const audioContext = new (window.AudioContext || window.webkitAudioContext)({
-				sampleRate: SAMPLE_RATE,
-				latencyHint: 'interactive',
-			});
-
-			console.log(audioContext.sampleRate);
-
-			const analyser = audioContext.createAnalyser();
-			analyser.fftSize = 32;
-
-			// NOTE: In Firefox, the following line may throw an error:
-			// "AudioContext.createMediaStreamSource: Connecting AudioNodes from AudioContexts with different sample-rate is currently not supported."
-			// See the following bug reports for more information:
-			//  - https://bugzilla.mozilla.org/show_bug.cgi?id=1674892
-			//  - https://bugzilla.mozilla.org/show_bug.cgi?id=1674892
-			const source = audioContext.createMediaStreamSource(stream);
-			source.connect(analyser);
-
-			await audioContext.audioWorklet.addModule(PATH + '/processor.js');
-
-			const worklet = new AudioWorkletNode(audioContext, 'vad-processor', {
-				numberOfInputs: 1,
-				numberOfOutputs: 0,
-				channelCount: 1,
-				channelCountMode: 'explicit',
-				channelInterpretation: 'discrete',
-			});
-
-			source.connect(worklet);
-
-			worklet.port.onmessage = (event) => {
-				const { buffer } = event.data;
-				// console.log(buffer);
-
-				// Dispatch buffer for voice activity detection
-				worker.postMessage({ buffer });
-			};
-		})
-		.catch((err) => {
-			console.error(err);
-		});
+export function playAudioBuffer(buff) {
+	const blob = new Blob([buff], { type: 'audio/wav' });
+	const url = window.URL.createObjectURL(blob);
+	const audio = new Audio();
+	audio.src = url;
+	audio.play();
 }
 
-function float32ArraysToWav(channelsData, sampleRate, bitsPerSample = 16) {
+export function float32ArraysToWav(channelsData, sampleRate, bitsPerSample = 16) {
 	if (!Array.isArray(channelsData) || !channelsData.length || !(channelsData[0] instanceof Float32Array)) {
 		throw new Error("Invalid 'channelsData' format. Expected an array of Float32Arrays.");
 	}

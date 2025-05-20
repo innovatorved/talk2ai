@@ -9,7 +9,6 @@ import {
 	MIN_SILENCE_DURATION_SAMPLES,
 	MIN_SPEECH_DURATION_SAMPLES,
 } from './constants.js';
-import { supportsWebGPU } from './utils.js';
 
 self.postMessage({
 	type: 'info',
@@ -71,7 +70,7 @@ async function vad(buffer) {
  * @param {Object} data Additional data
  */
 const transcribe = async (buffer, data) => {
-	console.log(buffer);
+	// console.log(buffer);
 	self.postMessage({ type: 'output', buffer, ...data });
 };
 
