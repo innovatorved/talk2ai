@@ -1,7 +1,8 @@
-import { streamText } from 'ai';
+import { smoothStream, streamText } from 'ai';
 import { bufferText } from './utils';
 import { DurableObject } from 'cloudflare:workers';
 import { createWorkersAI } from 'workers-ai-provider';
+import PQueue from 'p-queue';
 
 /* Todo
  * ✅ 1. WS with frontend
@@ -21,37 +22,41 @@ export class MyDurableObject extends DurableObject {
 		this.msgHistory = [];
 	}
 	async fetch(request: any) {
+		// set up ws pipeline
 		const webSocketPair = new WebSocketPair();
 		const [socket, ws] = Object.values(webSocketPair);
 
 		ws.accept();
 		const workersai = createWorkersAI({ binding: this.env.AI });
-		const model = workersai('@cf/meta/llama-3.3-70b-instruct-fp8-fast');
+		const queue = new PQueue({ concurrency: 1 });
 
 		ws.addEventListener('message', async (event) => {
-			const input = {
+			// transcribe audio buffer to text (stt)
+			const { text } = await this.env.AI.run('@cf/openai/whisper-tiny-en', {
 				audio: [...new Uint8Array(event.data as ArrayBuffer)],
-			};
-
-			const { text } = await this.env.AI.run('@cf/openai/whisper-tiny-en', input);
-			ws.send(JSON.stringify({ type: 'text', text }));
-			console.log('>> ', text);
+			});
+			console.log('>>', text);
+			ws.send(JSON.stringify({ type: 'text', text })); // send transcription to client
 			this.msgHistory.push({ role: 'user', content: text });
 
-			const { textStream } = streamText({
-				model,
+			// run inference
+			const result = streamText({
+				model: workersai('@cf/meta/llama-4-scout-17b-16e-instruct') as any,
 				system: 'You in a voice conversation with the user',
 				messages: this.msgHistory as any,
+				experimental_transform: smoothStream(),
 			});
-
 			// buffer streamed response into sentences, then convert to audio
-			await bufferText(textStream, async (sentence: string) => {
-				console.log('>>', sentence);
+			await bufferText(result.textStream, async (sentence: string) => {
 				this.msgHistory.push({ role: 'assistant', content: sentence });
-				const audio = await this.env.AI.run('@cf/myshell-ai/melotts' as any, {
-					prompt: sentence,
+				console.log('<<', sentence);
+				await queue.add(async () => {
+					// convert response to audio (tts)
+					const audio = await this.env.AI.run('@cf/myshell-ai/melotts' as any, {
+						prompt: sentence,
+					});
+					ws.send(JSON.stringify({ type: 'audio', text: sentence, audio: audio.audio }));
 				});
-				ws.send(JSON.stringify({ type: 'audio', text: sentence, audio: audio.audio }));
 			});
 		});
 
@@ -59,10 +64,7 @@ export class MyDurableObject extends DurableObject {
 			ws.close(cls.code, 'Durable Object is closing WebSocket');
 		});
 
-		return new Response(null, {
-			status: 101,
-			webSocket: socket,
-		});
+		return new Response(null, { status: 101, webSocket: socket });
 	}
 }
 
@@ -71,11 +73,9 @@ export default {
 		if (request.url.endsWith('/websocket')) {
 			const upgradeHeader = request.headers.get('Upgrade');
 			if (!upgradeHeader || upgradeHeader !== 'websocket') {
-				return new Response('Durable Object expected Upgrade: websocket', {
-					status: 426,
-				});
+				return new Response('Expected upgrade to websocket', { status: 426 });
 			}
-			let id: DurableObjectId = env.MY_DURABLE_OBJECT.idFromName(new URL(request.url).pathname);
+			let id: DurableObjectId = env.MY_DURABLE_OBJECT.idFromName(crypto.randomUUID());
 			let stub = env.MY_DURABLE_OBJECT.get(id);
 			return stub.fetch(request);
 		}
@@ -83,9 +83,7 @@ export default {
 		return new Response(null, {
 			status: 400,
 			statusText: 'Bad Request',
-			headers: {
-				'Content-Type': 'text/plain',
-			},
+			headers: { 'Content-Type': 'text/plain' },
 		});
 	},
 } satisfies ExportedHandler<Env>;

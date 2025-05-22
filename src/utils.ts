@@ -1,21 +1,27 @@
 export async function bufferText(textStream: ReadableStream, callBack: (sentence: string) => void) {
-	let buffer = '';
-
-	for await (const textPart of textStream) {
-		buffer += textPart;
+	let wordBuffer = '';
+	let timeoutId;
+	for await (const word of textStream) {
+		if (timeoutId) clearTimeout(timeoutId);
+		wordBuffer += word;
 
 		// Match sentences ending with ., !, or ? followed by a space or end of string
 		const sentenceRegex = /([^\r\n.?!]*[.?!])(\s|$)/g;
 		let match;
 		let lastIndex = 0;
 
-		while ((match = sentenceRegex.exec(buffer)) !== null) {
-			const sentence = buffer.slice(lastIndex, sentenceRegex.lastIndex).trim();
+		while ((match = sentenceRegex.exec(wordBuffer)) !== null) {
+			const sentence = wordBuffer.slice(lastIndex, sentenceRegex.lastIndex).trim();
 			if (sentence) callBack(sentence);
 			lastIndex = sentenceRegex.lastIndex;
 		}
 
-		// Keep only the unfinished part in the buffer
-		buffer = buffer.slice(lastIndex);
+		// Keep only the unfinished part in the wordBuffer
+		wordBuffer = wordBuffer.slice(lastIndex);
+
+		// Set a timer to process last buffer if no new word comes
+		timeoutId = setTimeout(() => {
+			if (wordBuffer) callBack(wordBuffer);
+		}, 1000);
 	}
 }

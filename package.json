@@ -14,12 +14,8 @@
 		"wrangler": "^4.2.0"
 	},
 	"dependencies": {
-		"@cokoghenun/async-iterator": "^1.0.3",
-		"@mintplex-labs/piper-tts-web": "^1.0.4",
 		"ai": "^4.2.0",
-		"base64-to-uint8array": "^1.0.0",
-		"lz-string": "^1.5.0",
-		"piper-tts-web": "^1.1.1",
+		"p-queue": "^8.1.0",
 		"workers-ai-provider": "^0.2.0"
 	}
 }
