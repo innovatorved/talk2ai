@@ -3,7 +3,7 @@ import { float32ArraysToWav, playAudioBuffer } from './utils.js';
 
 const PATH = '/vad';
 
-export function vad(onAudioBuffer, onStatus) {
+export async function vad(onAudioBuffer, onStatus) {
 	const worker = new Worker(PATH + '/worker.js', { type: 'module' });
 
 	const onError = (error) => console.log(error);
@@ -25,7 +25,7 @@ export function vad(onAudioBuffer, onStatus) {
 	worker.addEventListener('error', onError);
 	worker.addEventListener('message', onMessage);
 
-	const audioStream = navigator.mediaDevices.getUserMedia({
+	const stream = await navigator.mediaDevices.getUserMedia({
 		audio: {
 			channelCount: 1,
 			echoCancellation: true,
@@ -34,36 +34,37 @@ export function vad(onAudioBuffer, onStatus) {
 			sampleRate: SAMPLE_RATE,
 		},
 	});
+	window.stream = stream;
 
-	audioStream
-		.then(async (stream) => {
-			const audioContext = new (window.AudioContext || window.webkitAudioContext)({
-				sampleRate: SAMPLE_RATE,
-				latencyHint: 'interactive',
-			});
+	const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+		sampleRate: SAMPLE_RATE,
+		latencyHint: 'interactive',
+	});
 
-			const microphoneSource = audioContext.createMediaStreamSource(stream);
-			const analyser = audioContext.createAnalyser();
-			analyser.fftSize = 32;
-			microphoneSource.connect(analyser);
+	const microphoneSource = audioContext.createMediaStreamSource(stream);
+	const analyser = audioContext.createAnalyser();
+	analyser.fftSize = 32;
+	microphoneSource.connect(analyser);
 
-			await audioContext.audioWorklet.addModule(PATH + '/processor.js');
+	await audioContext.audioWorklet.addModule(PATH + '/processor.js');
 
-			const chunkNode = new AudioWorkletNode(audioContext, 'chunk-processor', {
-				numberOfInputs: 1,
-				numberOfOutputs: 0,
-				channelCount: 1,
-				channelCountMode: 'explicit',
-				channelInterpretation: 'discrete',
-			});
+	const chunkNode = new AudioWorkletNode(audioContext, 'chunk-processor', {
+		numberOfInputs: 1,
+		numberOfOutputs: 0,
+		channelCount: 1,
+		channelCountMode: 'explicit',
+		channelInterpretation: 'discrete',
+	});
 
-			microphoneSource.connect(chunkNode);
-			chunkNode.port.onmessage = (event) => {
-				const { buffer } = event.data;
-				worker.postMessage({ buffer });
-			};
-		})
-		.catch((err) => {
-			console.error(err);
-		});
+	microphoneSource.connect(chunkNode);
+	chunkNode.port.onmessage = (event) => {
+		const { buffer } = event.data;
+		worker.postMessage({ buffer });
+	};
+	// audioStream
+	// 	.then(async (stream) => {
+	// 	})
+	// 	.catch((err) => {
+	// 		console.error(err);
+	// 	});
 }

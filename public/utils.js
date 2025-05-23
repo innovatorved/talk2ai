@@ -12,9 +12,9 @@ const audioCtx = new AudioContext();
 // handles playing audio queue
 // implemented as functions because class implementation gets cleaned
 // prematurely
-export function queueSound(sound) {
+export function queueSound(sound, setStatus) {
 	sounds.push(sound);
-	playNext();
+	playNext(setStatus);
 }
 export function stopPlaying() {
 	playingSources.forEach((source) => {
@@ -27,9 +27,10 @@ export function stopPlaying() {
 		if (timeOutId) clearTimeout(timeOutId);
 	});
 }
-function playNext() {
+function playNext(setStatus) {
 	if (!isSpeaking && sounds?.length > 0) {
 		isSpeaking = true;
+		setStatus('AI Speaking...');
 		const arrayBuff = base64ToArrBuff(sounds.shift());
 		arraybufferToAudiobuffer(arrayBuff, audioCtx).then((audioBuffer) => {
 			const source = audioCtx.createBufferSource();
@@ -39,10 +40,10 @@ function playNext() {
 			playingSources.push(source);
 			source.onended = () => {
 				isSpeaking = false;
-				console.log('done speaking');
+				setStatus('Listening...');
 			};
 		});
 	} else {
-		timeOutId = setTimeout(playNext, 1000);
+		timeOutId = setTimeout(() => playNext(setStatus), 1000);
 	}
 }

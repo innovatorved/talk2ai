@@ -31,6 +31,15 @@ export class MyDurableObject extends DurableObject {
 		const queue = new PQueue({ concurrency: 1 });
 
 		ws.addEventListener('message', async (event) => {
+			// handle chat commands
+			if (typeof event.data === 'string') {
+				const { type, data } = JSON.parse(event.data);
+				if (type === 'cmd' && data === 'clear') {
+					this.msgHistory.length = 0; // clear chat history
+				}
+				return; // end processing here for this event type
+			}
+
 			// transcribe audio buffer to text (stt)
 			const { text } = await this.env.AI.run('@cf/openai/whisper-tiny-en', {
 				audio: [...new Uint8Array(event.data as ArrayBuffer)],
@@ -41,7 +50,7 @@ export class MyDurableObject extends DurableObject {
 
 			// run inference
 			const result = streamText({
-				model: workersai('@cf/meta/llama-4-scout-17b-16e-instruct') as any,
+				model: workersai('@cf/meta/llama-4-scout-17b-16e-instruct' as any),
 				system: 'You in a voice conversation with the user',
 				messages: this.msgHistory as any,
 				experimental_transform: smoothStream(),
@@ -54,6 +63,7 @@ export class MyDurableObject extends DurableObject {
 					// convert response to audio (tts)
 					const audio = await this.env.AI.run('@cf/myshell-ai/melotts' as any, {
 						prompt: sentence,
+						// lang: 'es'
 					});
 					ws.send(JSON.stringify({ type: 'audio', text: sentence, audio: audio.audio }));
 				});
