@@ -2,6 +2,8 @@
 
 This is a real-time voice-based chat application that allows users to have spoken conversations with an AI built from first principles. The application uses client-side Voice Activity Detection (VAD) to capture user speech, Cloudflare Workers for backend processing, and Cloudflare AI for Speech-to-Text (STT), Large Language Model (LLM) inference, and Text-to-Speech (TTS).
 
+[🚀🚀🚀 Live Demo](https://talk2ai.conflare.workers.dev/)
+
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/megaconfidence/talk2ai)
 
 ## ✨ Features
@@ -85,27 +87,6 @@ The backend is built using a Cloudflare Worker that utilizes a Durable Object to
 ### Data Flow Summary
 
 User Speech → VAD (Client) → Audio Chunk → WebSocket → Durable Object (Backend) → STT Model → User Text Transcript (to Client & LLM) → LLM → AI Text Response Stream → Sentence Buffer → TTS Model → AI Audio Chunk → WebSocket → Client (Play Audio & Display Text)
-
-## 🛠️ Tech Stack
-
-### Frontend
-
-* HTML, CSS, JavaScript
-* **Voice Activity Detection (VAD):** Custom VAD implementation (`vad/index.js`)
-* **WebSocket API:** For real-time bidirectional communication.
-* **Web Audio API:** For playing back AI audio.
-* `arraybuffer-to-audiobuffer`: For converting ArrayBuffers to AudioBuffers.
-
-### Backend (Cloudflare)
-
-* **Cloudflare Workers:** Serverless compute platform.
-* **Durable Objects:** For stateful WebSocket connections and managing conversation history per user.
-* **Cloudflare AI:**
-    * **STT:** `@cf/openai/whisper-tiny-en`
-    * **LLM:** `@cf/meta/llama-4-scout-17b-16e-instruct` (via `workers-ai-provider` and `ai` SDK)
-    * **TTS:** `@cf/myshell-ai/melotts`
-* **`ai` SDK:** For interacting with Cloudflare AI models (specifically `streamText`, `smoothStream`).
-* **`p-queue`:** For managing the concurrency of TTS requests.
 
 ## ⚙️ Setup & Running
 
