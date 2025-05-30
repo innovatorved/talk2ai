@@ -16,6 +16,7 @@ export function queueSound(sound, setStatus) {
 	sounds.push(sound);
 	playNext(setStatus);
 }
+
 export function stopPlaying() {
 	playingSources.forEach((source) => {
 		try {
@@ -27,6 +28,7 @@ export function stopPlaying() {
 		if (timeOutId) clearTimeout(timeOutId);
 	});
 }
+
 function playNext(setStatus) {
 	if (!isSpeaking && sounds?.length > 0) {
 		isSpeaking = true;
