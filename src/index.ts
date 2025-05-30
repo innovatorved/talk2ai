@@ -41,7 +41,7 @@ export class MyDurableObject extends DurableObject {
 			}
 
 			// transcribe audio buffer to text (stt)
-			const { text } = await this.env.AI.run('@cf/openai/whisper', {
+			const { text } = await this.env.AI.run('@cf/openai/whisper-tiny-en', {
 				audio: [...new Uint8Array(event.data as ArrayBuffer)],
 			});
 			console.log('>>', text);
