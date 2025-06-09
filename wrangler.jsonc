@@ -10,7 +10,7 @@
 	"compatibility_flags": ["nodejs_compat"],
 	"migrations": [
 		{
-			"new_classes": ["MyDurableObject"],
+			"new_sqlite_classes": ["MyDurableObject"],
 			"tag": "v1",
 		},
 	],
@@ -23,14 +23,12 @@
 			{
 				"class_name": "MyDurableObject",
 				"name": "MY_DURABLE_OBJECT",
+				
 			},
 		],
 	},
 	"observability": {
 		"enabled": true,
-	},
-	"ai": {
-		"binding": "AI",
 	},
 	/**
 	 * Smart Placement

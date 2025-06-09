@@ -1,15 +1,36 @@
 import { smoothStream, streamText } from 'ai';
 import { bufferText } from './utils';
 import { DurableObject } from 'cloudflare:workers';
-import { createWorkersAI } from 'workers-ai-provider';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createClient } from '@deepgram/sdk';
+
 import PQueue from 'p-queue';
+
+// Helper function to convert stream to audio buffer
+async function getAudioBuffer(stream: ReadableStream): Promise<Buffer> {
+	const reader = stream.getReader();
+	const chunks: Uint8Array[] = [];
+
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		chunks.push(value);
+	}
+
+	const dataArray = chunks.reduce(
+		(acc, chunk) => Uint8Array.from([...acc, ...chunk]),
+		new Uint8Array(0)
+	);
+
+	return Buffer.from(dataArray.buffer);
+}
 
 /* Todo
  * ✅ 1. WS with frontend
  * ✅ 2. Get audio to backend
- * ✅ 3. Convert audio to text
+ * ✅ 3. Convert audio to text (using Deepgram Nova)
  * ✅ 4. Run inference
- * ✅ 5. Convert result to audio
+ * ✅ 5. Convert result to audio (using Deepgram Aura)
  * ✅ 6. Send audio to frontend
  */
 
@@ -27,8 +48,13 @@ export class MyDurableObject extends DurableObject {
 		const [socket, ws] = Object.values(webSocketPair);
 
 		ws.accept();
-		const workersai = createWorkersAI({ binding: this.env.AI });
 		const queue = new PQueue({ concurrency: 1 });
+		const google = createGoogleGenerativeAI({
+			apiKey: this.env.GOOGLE_GENERATIVE_AI_API_KEY,
+		});
+
+		// Initialize Deepgram client
+		const deepgram = createClient(this.env.DEEPGRAM_API_KEY);
 
 		ws.addEventListener('message', async (event) => {
 			// handle chat commands
@@ -40,17 +66,30 @@ export class MyDurableObject extends DurableObject {
 				return; // end processing here for this event type
 			}
 
-			// transcribe audio buffer to text (stt)
-			const { text } = await this.env.AI.run('@cf/openai/whisper-tiny-en', {
-				audio: [...new Uint8Array(event.data as ArrayBuffer)],
-			});
+			// transcribe audio buffer to text (stt) using Deepgram Nova
+			const { result: transcriptionResult, error } = await deepgram.listen.prerecorded.transcribeFile(
+				// Convert ArrayBuffer to Buffer for Deepgram
+				Buffer.from(event.data as ArrayBuffer),
+				{
+					model: 'nova-3',
+					smart_format: true,
+					language: 'en',
+				}
+			);
+
+			if (error) {
+				console.error('Deepgram transcription error:', error);
+				return;
+			}
+
+			const text = transcriptionResult?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
 			console.log('>>', text);
 			ws.send(JSON.stringify({ type: 'text', text })); // send transcription to client
 			this.msgHistory.push({ role: 'user', content: text });
 
 			// run inference
 			const result = streamText({
-				model: workersai('@cf/meta/llama-4-scout-17b-16e-instruct' as any),
+				model: google('gemini-2.0-flash-lite'),
 				system: 'You in a voice conversation with the user',
 				messages: this.msgHistory as any,
 				experimental_transform: smoothStream(),
@@ -60,12 +99,26 @@ export class MyDurableObject extends DurableObject {
 				this.msgHistory.push({ role: 'assistant', content: sentence });
 				console.log('<<', sentence);
 				await queue.add(async () => {
-					// convert response to audio (tts)
-					const audio = await this.env.AI.run('@cf/myshell-ai/melotts' as any, {
-						prompt: sentence,
-						// lang: 'es'
-					});
-					ws.send(JSON.stringify({ type: 'audio', text: sentence, audio: audio.audio }));
+					// convert response to audio (tts) using Deepgram Aura
+					const response = await deepgram.speak.request(
+						{ text: sentence },
+						{
+							model: 'aura-asteria-en',
+							encoding: 'linear16',
+							container: 'wav',
+						}
+					);
+					
+					const stream = await response.getStream();
+					if (stream) {
+						// Convert the stream to an audio buffer
+						const audioBuffer = await getAudioBuffer(stream);
+						// Convert buffer to base64 for WebSocket transmission
+						const audioBase64 = audioBuffer.toString('base64');
+						ws.send(JSON.stringify({ type: 'audio', text: sentence, audio: audioBase64 }));
+					} else {
+						console.error('Error generating audio with Deepgram Aura');
+					}
 				});
 			});
 		});
