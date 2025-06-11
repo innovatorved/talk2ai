@@ -132,13 +132,6 @@
         .messages-area::-webkit-scrollbar { display: none; }
         .messages-area { -ms-overflow-style: none; scrollbar-width: none; }
 
-        /* Custom Modal for Firefox warning */
-        .modal-overlay {
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: flex; justify-content: center; align-items: center;
-            z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0.3s;
-        }
         .modal-overlay.active { opacity: 1; visibility: visible; }
         .modal-content {
             background-color: white; padding: 1.5rem 2rem; border-radius: 0.5rem;
@@ -206,16 +199,8 @@
             </footer>
     </div>
 
-    <div class="modal-overlay" id="firefoxModal">
-        <div class="modal-content">
-            <h2>Firefox Not Supported</h2>
-            <p>Firefox is not currently supported due to a known bug. Please try again in another browser.
-               For more details, see: <a href="https://bugzilla.mozilla.org/show_bug.cgi?id=1674892" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">Firefox Bug #1674892</a>
-            </p>
-            <button id="closeFirefoxModal">OK</button>
-        </div>
-    </div>
 
+		<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.js"></script>
+		<script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
 		<script type="module" src="index.js"></script>
 </html>
-

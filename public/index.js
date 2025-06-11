@@ -1,4 +1,4 @@
-import { vad } from './vad/index.js';
+import { startVad } from './vad/index.js';
 import { base64ToArrBuff, queueSound, stopPlaying } from './utils.js';
 import arraybufferToAudiobuffer from 'https://cdn.jsdelivr.net/npm/arraybuffer-to-audiobuffer@0.0.5/+esm';
 
@@ -69,13 +69,6 @@ window.initializeVADSystem = async function () {
 	}
 	setStatus('Initializing VAD...');
 
-	const isFirefox = navigator.userAgent.indexOf('Firefox') !== -1;
-	if (isFirefox) {
-		showFirefoxWarning();
-		setStatus('Firefox not supported.');
-		return false; // VAD initialization failed
-	}
-
 	function onAudioBuffer(buff) {
 		if (socket && socket.readyState === WebSocket.OPEN) {
 			stopPlaying(); // stop any ai audio before sending user audio
@@ -91,7 +84,7 @@ window.initializeVADSystem = async function () {
 	}
 
 	try {
-		await vad(onAudioBuffer, onVADStatus); // Initialize VAD
+		await startVad(onAudioBuffer, onVADStatus); // Initialize VAD
 		vadInitialized = true;
 		console.log('VAD initialized successfully.');
 		setStatus('Listening...');

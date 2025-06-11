@@ -4,9 +4,7 @@ const stopButton = document.getElementById('stopButton');
 const statusText = document.getElementById('statusText');
 const startButton = document.getElementById('startButton');
 const messagesArea = document.getElementById('messagesArea');
-const firefoxModal = document.getElementById('firefoxModal');
 const clearChatButton = document.getElementById('clearChatButton');
-const closeFirefoxModalButton = document.getElementById('closeFirefoxModal');
 const voiceVisualizationArea = document.getElementById('voiceVisualizationArea');
 const voiceBars = Array.from(voiceVisualizationArea.querySelectorAll('.voice-bar'));
 
@@ -82,10 +80,6 @@ window.updateUserVoiceVisualization = function () {
 	});
 };
 
-window.showFirefoxWarning = function () {
-	firefoxModal.classList.add('active');
-};
-
 window.handleStartConversation = async function () {
 	if (conversationActive) return;
 
@@ -93,7 +87,6 @@ window.handleStartConversation = async function () {
 
 	const vadReady = await initializeVADSystem();
 	if (!vadReady) {
-		// VAD failed to initialize (e.g., Firefox or other error)
 		// ui state should reflect this, perhaps disable start button until refresh
 		startButton.disabled = false;
 		stopButton.disabled = true;
@@ -175,7 +168,6 @@ window.handleClearChat = function () {
 // init
 updateButtonText(); // set initial button text based on screen size
 window.addEventListener('resize', updateButtonText);
-closeFirefoxModalButton.addEventListener('click', () => firefoxModal.classList.remove('active'));
 
 addInitialMessage();
 voiceVisualizationArea.style.display = 'none';
