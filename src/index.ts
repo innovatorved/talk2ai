@@ -53,7 +53,7 @@ export class MyDurableObject extends DurableObject {
 				model: workersai('@cf/meta/llama-4-scout-17b-16e-instruct' as any),
 				system: 'You in a voice conversation with the user',
 				messages: this.msgHistory as any,
-				experimental_transform: smoothStream(),
+				// experimental_transform: smoothStream(),
 			});
 			// buffer streamed response into sentences, then convert to audio
 			await bufferText(result.textStream, async (sentence: string) => {
