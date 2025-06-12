@@ -14,6 +14,7 @@ export async function startVad(onAudioBuffer, onStatus) {
 	});
 	window.stream = stream; // make stream global
 
+	// from https://github.com/ricky0123/vad
 	const micVad = await vad.MicVAD.new({
 		stream,
 		model: 'v5',
