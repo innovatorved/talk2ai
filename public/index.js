@@ -4,9 +4,10 @@ import arraybufferToAudiobuffer from 'https://cdn.jsdelivr.net/npm/arraybuffer-t
 
 // Whisper.wasm related global variables
 window.instance = null;
-window.model_whisper = ''; // Name of the loaded model
+window.model_whisper = ''; // Name of the loaded model, VFS path e.g. 'whisper.bin'
 let isWasmRuntimeInitialized = false;
-let queuedFileOperations = []; // To store { operation: 'store', fname, buf } or { operation: 'init_instance', modelPath }
+let queuedFileOperations = []; // To store { operation: 'store', fname, buf, originalModelName } or { operation: 'init_instance', modelPath }
+let modelReadyForInstanceInit = false;
 window.currentAudioBuffer = []; // Accumulates audio chunks for Whisper
 const WHISPER_SAMPLE_RATE = 16000; // Whisper requires 16kHz mono audio
 let dbVersion = 1;
@@ -166,49 +167,65 @@ window.Module = {
     onRuntimeInitialized: function() {
         console.log("WASM Runtime: Initialized.");
         isWasmRuntimeInitialized = true;
+        let instanceInitQueued = false;
+        let modelPathForQueuedInit = null;
+
         queuedFileOperations.forEach(op => {
             if (op.operation === 'store') {
-                console.log("WASM Runtime: Processing queued 'store' for", op.fname);
+                console.log(`WASM Runtime: Processing queued 'store' for ${op.fname} (original: ${op.originalModelName})`);
                 if (window.Module.FS_unlink && window.Module.FS_createDataFile) {
                     try { window.Module.FS_unlink(op.fname); } catch (e) { /* ignore */ }
                     window.Module.FS_createDataFile("/", op.fname, op.buf, true, true);
-                    console.log("WASM Runtime: Queued store for", op.fname, "completed.");
 
-                    model_whisper = op.fname;
-                    document.getElementById('model-whisper-status').innerHTML = `Loaded: ${model_name_ggml} (as ${op.fname})`;
-                    setStatus(`Model ${model_name_ggml} loaded.`);
+                    model_whisper = op.fname; // This is 'whisper.bin'
+                    model_name_ggml = op.originalModelName; // Restore the user-facing name
+
+                    document.getElementById('model-whisper-status').innerHTML = `Model: ${model_name_ggml} (Loaded to VFS)`;
+                    setStatus(`Model ${model_name_ggml} ready in WASM FS.`);
                     console.log('storeFS (deferred): stored model: ' + op.fname + ' (original: ' + model_name_ggml + ') size: ' + op.buf.length);
+
+                    modelReadyForInstanceInit = true;
+                    console.log("WASM Runtime: Model", op.fname, "is now in VFS. modelReadyForInstanceInit = true");
 
                     const modelButtons = ['fetch-whisper-tiny-en', 'fetch-whisper-tiny', 'fetch-whisper-base-en', 'fetch-whisper-base', 'fetch-whisper-tiny-en-q5_1', 'fetch-whisper-tiny-q5_1', 'fetch-whisper-base-en-q5_1', 'fetch-whisper-base-q5_1'];
                     modelButtons.forEach(id => {
                         const btn = document.getElementById(id);
                         if(btn) btn.style.display = 'none';
                     });
-                    document.getElementById('whisper-file').style.display = 'none';
-                    document.getElementById('model-whisper-status').innerHTML = 'Model: ' + model_name_ggml;
+                    if(document.getElementById('whisper-file')) document.getElementById('whisper-file').style.display = 'none';
 
                 } else {
-                    console.error("WASM Runtime: Error - FS methods still not available in onRuntimeInitialized for 'store'.");
+                    console.error("WASM Runtime: Error - FS methods not available in onRuntimeInitialized for 'store'.");
                     setStatus("Error: Could not save model to WASM FS.");
+                    modelReadyForInstanceInit = false;
                 }
             } else if (op.operation === 'init_instance') {
-                console.log("WASM Runtime: Processing queued 'init_instance' for", op.modelPath);
-                if (window.Module.init) {
-                    window.instance = Module.init(op.modelPath);
-                    if (window.instance) {
-                        console.log("WASM Runtime: Queued instance init for", op.modelPath, "completed. Instance:", window.instance);
-                        setStatus("Whisper initialized (deferred). Ready to transcribe.");
-                    } else {
-                        setStatus("Error initializing Whisper (deferred).");
-                        console.error("Failed to initialize Whisper instance (deferred).");
-                    }
-                } else {
-                     console.error("WASM Runtime: Error - Module.init still not available in onRuntimeInitialized for 'init_instance'.");
-                     setStatus("Error: Could not initialize Whisper instance (deferred).");
-                }
+                instanceInitQueued = true;
+                modelPathForQueuedInit = op.modelPath;
             }
         });
+
+        if (instanceInitQueued && modelReadyForInstanceInit) {
+            console.log("WASM Runtime: Processing queued 'init_instance' for", modelPathForQueuedInit);
+            if (window.Module.init) {
+                window.instance = Module.init(modelPathForQueuedInit);
+                if (window.instance) {
+                    setStatus("Whisper initialized (deferred). Ready to transcribe.");
+                    console.log("WASM Runtime: Queued instance init for", modelPathForQueuedInit, "completed. Instance:", window.instance);
+                } else {
+                    setStatus("Error initializing Whisper (deferred from queue).");
+                    console.error("WASM Runtime: Failed to initialize Whisper instance (deferred from queue).");
+                }
+            } else {
+                 console.error("WASM Runtime: Module.init not available for queued 'init_instance'.");
+            }
+        } else if (instanceInitQueued && !modelReadyForInstanceInit) {
+            console.warn("WASM Runtime: Instance init was queued, but model is not ready in VFS. User might need to re-initiate action.");
+            setStatus("Model loaded, but Whisper engine init pending. Try starting conversation again.");
+        }
+
         queuedFileOperations = [];
+        console.log("WASM Runtime: Finished processing queued operations.");
     },
     setStatus: function(text) {
         if (text.includes("Downloading data...")) {
@@ -234,46 +251,50 @@ function convertTypedArray(src, type) {
 }
 
 // Function to store model in WASM FS and update UI
-function storeFS(fname, buf) {
+function storeFS(fname, buf) { // fname is 'whisper.bin', model_name_ggml is the display name like 'base.en'
     if (isWasmRuntimeInitialized && window.Module && window.Module.FS_createDataFile && window.Module.FS_unlink) {
-        console.log("storeFS: Storing", fname, "directly.");
+        console.log(`storeFS: Runtime initialized. Storing ${fname} (original: ${model_name_ggml}) directly.`);
         try { window.Module.FS_unlink(fname); } catch (e) { /* ignore */ }
         window.Module.FS_createDataFile("/", fname, buf, true, true);
-        console.log("storeFS: Successfully stored", fname, "in VFS.");
 
-        model_whisper = fname;
-        document.getElementById('model-whisper-status').innerHTML = `Loaded: ${model_name_ggml} (as ${fname})`;
-        setStatus(`Model ${model_name_ggml} loaded.`);
-        // console.log('storeFS: stored model: ' + fname + ' (original: ' + model_name_ggml + ') size: ' + buf.length); // Already logged above effectively
+        model_whisper = fname; // Set the VFS path
+        // model_name_ggml is already set by loadWhisper/loadFile
+
+        document.getElementById('model-whisper-status').innerHTML = `Model: ${model_name_ggml} (Loaded to VFS)`;
+        setStatus(`Model ${model_name_ggml} ready in WASM FS.`);
+        console.log('storeFS: stored model: ' + fname + ' (original: ' + model_name_ggml + ') size: ' + buf.length);
+        modelReadyForInstanceInit = true;
+        console.log("storeFS: modelReadyForInstanceInit = true");
 
         const modelButtons = ['fetch-whisper-tiny-en', 'fetch-whisper-tiny', 'fetch-whisper-base-en', 'fetch-whisper-base', 'fetch-whisper-tiny-en-q5_1', 'fetch-whisper-tiny-q5_1', 'fetch-whisper-base-en-q5_1', 'fetch-whisper-base-q5_1'];
         modelButtons.forEach(id => {
             const btn = document.getElementById(id);
             if(btn) btn.style.display = 'none';
         });
-        document.getElementById('whisper-file').style.display = 'none';
-        document.getElementById('model-whisper-status').innerHTML = 'Model: ' + model_name_ggml;
+        if(document.getElementById('whisper-file')) document.getElementById('whisper-file').style.display = 'none';
 
     } else {
-        console.log("storeFS: Queued store operation for", fname);
-        queuedFileOperations.push({ operation: 'store', fname, buf });
+        console.log(`storeFS: Runtime not yet initialized. Queuing FS operation for ${fname} (original: ${model_name_ggml}).`);
+        // Pass current model_name_ggml to be restored when queue is processed
+        queuedFileOperations.push({ operation: 'store', fname, buf, originalModelName: model_name_ggml });
         document.getElementById('model-whisper-status').innerHTML = `Model ${model_name_ggml} downloaded, waiting for WASM FS...`;
+        modelReadyForInstanceInit = false; // Not ready yet
     }
 }
 
-window.loadFile = function(event, fname) {
+window.loadFile = function(event, fname) { // fname is 'whisper.bin'
     console.log("UI: loadFile called for local file. Target VFS name:", fname);
     var file = event.target.files[0] || null;
     if (file == null) return;
 
-    model_name_ggml = file.name;
+    model_name_ggml = file.name; // Set the display name HERE
     setStatus(`Loading model: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
     console.log("loadFile: loading model: " + file.name + ", size: " + file.size + " bytes. Please wait...");
 
     var reader = new FileReader();
     reader.onload = function(e) {
         var buf = new Uint8Array(e.target.result);
-        storeFS(fname, buf);
+        storeFS(fname, buf); // storeFS will use the global model_name_ggml
     }
     reader.readAsArrayBuffer(file);
 }
@@ -284,11 +305,12 @@ window.cbProgress = function(p) {
     if (el) {
         el.innerHTML = `${model_name_ggml}: ` + progressPercent + '%';
     }
-    console.log("UI: Model fetch progress for", model_name_ggml, ":", progressPercent + '%');
+    // console.log("UI: Model fetch progress for", model_name_ggml, ":", progressPercent + '%'); // Can be too verbose
 }
 
 window.cbCancel = function() {
-    console.log("UI: Model load cancelled/failed for", model_name_ggml);
+    // model_name_ggml should hold the name of the model that failed/was cancelled
+    console.log("UI: Model load cancelled/failed for", model_name_ggml || "unknown model");
     const modelButtons = ['fetch-whisper-tiny-en', 'fetch-whisper-tiny', 'fetch-whisper-base-en', 'fetch-whisper-base', 'fetch-whisper-tiny-en-q5_1', 'fetch-whisper-tiny-q5_1', 'fetch-whisper-base-en-q5_1', 'fetch-whisper-base-q5_1'];
     modelButtons.forEach(id => {
         const btn = document.getElementById(id);
@@ -302,11 +324,11 @@ window.cbCancel = function() {
 
 window.loadWhisper = function(model) {
     console.log("UI: loadWhisper called for model:", model);
-    let urls = {
-        'tiny.en':  'https://whisper.ggerganov.com/ggml-model-whisper-tiny.en.bin',
-        'tiny':     'https://whisper.ggerganov.com/ggml-model-whisper-tiny.bin',
-        'base.en':  'https://whisper.ggerganov.com/ggml-model-whisper-base.en.bin',
-        'base':     'https://whisper.ggerganov.com/ggml-model-whisper-base.bin',
+    let urls = { // URLs are already pointing to Hugging Face or similar
+        'tiny.en':  'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin',
+        'tiny':     'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin',
+        'base.en':  'https://whisper.ggerganov.com/ggml-model-whisper-base.en.bin', // This one might still be original
+        'base':     'https://whisper.ggerganov.com/ggml-model-whisper-base.bin',   // This one might still be original
         'tiny-en-q5_1':  'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin',
         'tiny-q5_1':     'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin',
         'base-en-q5_1':  'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin',
@@ -325,13 +347,13 @@ window.loadWhisper = function(model) {
     }
 
     let url     = urls[model];
-    let dst     = 'whisper.bin'; // Target filename in WASM virtual file system
+    let dst     = 'whisper.bin';
     let size_mb = sizes[model];
 
-    model_name_ggml = model; // Store the friendly model name for UI updates
+    model_name_ggml = model; // Set the display name HERE
 
-    setStatus(`Fetching model: ${model} (${size_mb} MB)`);
-    console.log(`Loading model: ${model} from ${url}`);
+    setStatus(`Fetching model: ${model_name_ggml} (${size_mb} MB)`);
+    console.log(`Loading model: ${model_name_ggml} from ${url}`);
 
     // Hide buttons during fetch
     const modelButtons = ['fetch-whisper-tiny-en', 'fetch-whisper-tiny', 'fetch-whisper-base-en', 'fetch-whisper-base', 'fetch-whisper-tiny-en-q5_1', 'fetch-whisper-tiny-q5_1', 'fetch-whisper-base-en-q5_1', 'fetch-whisper-base-q5_1'];
@@ -503,64 +525,85 @@ function processCollectedAudio() {
     console.log("Whisper: processCollectedAudio called.");
     if (currentAudioBuffer.length === 0) {
         console.log("Whisper: No audio in currentAudioBuffer to process.");
+        if (document.getElementById('statusText').textContent === "Transcribing with Whisper...") {
+             setStatus('Listening...');
+        }
         return;
     }
 
-    if (!model_whisper) {
-        console.log("Whisper: Model not loaded, cannot process audio.");
-        setStatus("Whisper model not loaded. Please select and load a model.");
+    if (!model_whisper) { // This should be 'whisper.bin' if a model was processed by storeFS
+        setStatus("Whisper model not selected/loaded into VFS. Please select a model.");
+        console.warn("Whisper: model_whisper (VFS path) is not set. Cannot process audio.");
         currentAudioBuffer = [];
         return;
     }
 
+    console.log("Whisper: Checking conditions for instance init/use. isWasmRuntimeInitialized:", isWasmRuntimeInitialized, "modelReadyForInstanceInit:", modelReadyForInstanceInit, "window.instance:", window.instance);
+
     if (!window.instance) {
-        if (isWasmRuntimeInitialized && window.Module && window.Module.init) {
-            console.log("Whisper: Initializing instance with model:", model_whisper);
+        if (isWasmRuntimeInitialized && modelReadyForInstanceInit && window.Module && window.Module.init) {
             setStatus("Initializing Whisper instance...");
-            window.instance = Module.init(model_whisper);
+            console.log("Whisper: Initializing instance with VFS model path:", model_whisper);
+            window.instance = Module.init(model_whisper); // model_whisper is 'whisper.bin'
             if (window.instance) {
-                console.log("Whisper: Instance initialized successfully:", window.instance);
                 setStatus("Whisper initialized. Ready to transcribe.");
+                console.log("Whisper: Instance initialized successfully:", window.instance);
             } else {
-                console.error("Whisper: Failed to initialize instance.");
                 setStatus("Error initializing Whisper. Please reload model or refresh.");
+                console.error("Whisper: Failed to initialize Whisper instance with " + model_whisper);
                 currentAudioBuffer = [];
                 return;
             }
         } else {
-            console.log("Whisper: Runtime not ready or Module.init not available. Queuing instance initialization for model:", model_whisper);
-            setStatus("Whisper runtime not ready. Queuing instance initialization.");
+            setStatus("Whisper engine not ready or model not in VFS. Queuing instance init.");
+            console.log("Whisper: Conditions not met for immediate init. isWasmRuntimeInitialized:", isWasmRuntimeInitialized, "modelReadyForInstanceInit:", modelReadyForInstanceInit, "window.Module.init exists:", !!(window.Module && window.Module.init));
+
             if (!queuedFileOperations.find(op => op.operation === 'init_instance')) {
+                 console.log("Whisper: Queuing 'init_instance' operation for model path:", model_whisper);
                  queuedFileOperations.push({ operation: 'init_instance', modelPath: model_whisper });
+            } else {
+                console.log("Whisper: 'init_instance' operation already in queue for model path:", model_whisper);
             }
+            console.warn("Whisper: Deferring transcription, current audio buffer will be cleared.");
+            setStatus("Whisper engine initializing, please try speaking again shortly.");
             currentAudioBuffer = [];
             return;
         }
     }
 
-    let totalLengthEstimate = 0;
-    currentAudioBuffer.forEach(chunk => totalLengthEstimate += chunk.length);
-    console.log("Whisper: Preparing to process collected audio. Number of chunks:", currentAudioBuffer.length, "Total estimated length (Float32Arrays):", totalLengthEstimate);
+    let totalLength = 0;
+    currentAudioBuffer.forEach(chunk => totalLength += chunk.length);
+    console.log("Whisper: Preparing to process collected audio. Number of chunks:", currentAudioBuffer.length, "Total Float32 samples:", totalLength);
 
-    const combinedAudio = new Float32Array(totalLengthEstimate);
+    if (totalLength === 0) {
+        console.warn("Whisper: Combined audio buffer is empty after all checks. Skipping transcription.");
+        setStatus("Listening...");
+        return;
+    }
+
+    const combinedAudio = new Float32Array(totalLength);
     let offset = 0;
     currentAudioBuffer.forEach(chunk => {
         combinedAudio.set(chunk, offset);
         offset += chunk.length;
     });
-    console.log("Whisper: Combined audio buffer created. Length:", combinedAudio.length, "Type:", combinedAudio.constructor.name);
     currentAudioBuffer = [];
 
-    const lang = document.getElementById('language').value;
-    const nthreads = parseInt(document.getElementById('threads').value, 10);
-    const translate = false;
-    console.log("Whisper: Calling full_default. Language:", lang, "Threads:", nthreads, "Translate:", translate, "Audio length:", combinedAudio.length);
+    console.log(`Whisper: Combined audio buffer created. Length: ${combinedAudio.length}, Type: ${combinedAudio.constructor.name}, Duration: ${(combinedAudio.length / WHISPER_SAMPLE_RATE).toFixed(2)}s`);
     setStatus("Transcribing with Whisper...");
 
+    const lang = document.getElementById('language').value;
+    let nthreadsElement = document.getElementById('threads');
+    let nthreads = nthreadsElement ? parseInt(nthreadsElement.value, 10) : 4;
+    console.log("Whisper: Using threads from UI:", document.getElementById('threads').value, "Parsed as:", nthreads);
+
+    const translate = false;
+
+    console.log("Whisper: Calling full_default. Language:", lang, "Threads:", nthreads, "Translate:", translate, "Audio length (samples):", combinedAudio.length);
     setTimeout(() => {
         try {
             const ret = Module.full_default(window.instance, combinedAudio, lang, nthreads, translate);
-            console.log('Whisper: full_default returned code:', ret);
+            console.log('Whisper: full_default call returned code:', ret);
             if (ret !== 0) {
                 setStatus("Whisper transcription error code: " + ret);
                 console.error("Whisper: full_default failed with code: " + ret);
