@@ -57,35 +57,43 @@ export class MyDurableObject extends DurableObject {
 		const deepgram = createClient(this.env.DEEPGRAM_API_KEY);
 
 		ws.addEventListener('message', async (event) => {
-			// handle chat commands
+			let userText = '';
+			let fromClient = false;
+
 			if (typeof event.data === 'string') {
-				const { type, data } = JSON.parse(event.data);
-				if (type === 'cmd' && data === 'clear') {
-					this.msgHistory.length = 0; // clear chat history
+				try {
+					const parsedData = JSON.parse(event.data as string);
+					if (parsedData.type === 'cmd' && parsedData.data === 'clear') {
+						this.msgHistory.length = 0; // clear chat history
+						console.log('Chat history cleared.');
+						return; // end processing here for cmd:clear
+					} else if (parsedData.type === 'text' && typeof parsedData.text === 'string') {
+						// This is a transcription from the client (Whisper.wasm)
+						userText = parsedData.text;
+						fromClient = parsedData.fromClient || false; // Check if it's marked from client
+						console.log('>> Received text from client:', userText);
+						// Do not send this text back to the originating client if fromClient is true
+					} else {
+						console.warn('Received unhandled string message type or format:', parsedData);
+						return;
+					}
+				} catch (e) {
+					console.error('Failed to parse string message from client:', e);
+					return; // Not a valid JSON command or text message
 				}
-				return; // end processing here for this event type
+			} else {
+				// This block would have handled raw audio for Deepgram STT.
+				// It's now removed as STT is client-side.
+				console.log('Received binary data, but STT is now client-side. Ignoring.');
+				return; // No longer processing direct audio buffers for STT
 			}
 
-			// transcribe audio buffer to text (stt) using Deepgram Nova
-			const { result: transcriptionResult, error } = await deepgram.listen.prerecorded.transcribeFile(
-				// Convert ArrayBuffer to Buffer for Deepgram
-				Buffer.from(event.data as ArrayBuffer),
-				{
-					model: 'nova-3',
-					smart_format: true,
-					language: 'en',
-				}
-			);
-
-			if (error) {
-				console.error('Deepgram transcription error:', error);
+			if (!userText) {
+				console.log('No user text to process.');
 				return;
 			}
 
-			const text = transcriptionResult?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
-			console.log('>>', text);
-			ws.send(JSON.stringify({ type: 'text', text })); // send transcription to client
-			this.msgHistory.push({ role: 'user', content: text });
+			this.msgHistory.push({ role: 'user', content: userText });
 
 			// run inference
 			const result = streamText({

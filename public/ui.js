@@ -54,9 +54,9 @@ window.addMessage = function (text, sender) {
 		if (thinkingTimeoutId) clearTimeout(thinkingTimeoutId);
 		const existingThinkingIndicator = messageBubble.querySelector('.ai-speaking-indicator');
 		if (existingThinkingIndicator) existingThinkingIndicator.remove();
-	} else if (sender === 'user' && conversationActive) {
-		setStatus('Listening...');
 	}
+	// Removed user message status update here, as index.js handles "Listening..."
+	// after transcription is complete and if conversation is active.
 
 	messagesArea.appendChild(messageBubble);
 	messagesArea.scrollTop = messagesArea.scrollHeight;
@@ -64,9 +64,12 @@ window.addMessage = function (text, sender) {
 
 window.showThinkingIndicator = function (show) {
 	if (show) {
-		setStatus('Processing...');
+		setStatus('AI is processing...'); // More specific status
 	} else {
-		if (statusText.textContent === 'Processing...' && conversationActive) {
+		// Only revert to "Listening..." if the status was "AI is processing..."
+		// and the conversation is still supposed to be active.
+		// Other statuses (like errors or model loading) should persist.
+		if (statusText.textContent === 'AI is processing...' && conversationActive) {
 			setStatus('Listening...');
 		}
 	}
@@ -116,7 +119,7 @@ window.handleStartConversation = async function () {
 	} else {
 		addMessage('Conversation resumed.', 'ai');
 	}
-	setStatus('Listening...');
+	// setStatus('Listening...'); // Removed, index.js will set this after model loading if appropriate
 };
 
 window.handleStopConversation = function () {
