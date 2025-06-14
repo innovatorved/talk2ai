@@ -57,37 +57,43 @@ export class MyDurableObject extends DurableObject {
 		const deepgram = createClient(this.env.DEEPGRAM_API_KEY);
 
 		ws.addEventListener('message', async (event) => {
-			// handle chat commands
+			let text = ''; // Variable to store the text to be processed by AI
+
 			if (typeof event.data === 'string') {
-				const { type, data } = JSON.parse(event.data);
-				if (type === 'cmd' && data === 'clear') {
-					this.msgHistory.length = 0; // clear chat history
+				try {
+					const parsedData = JSON.parse(event.data as string);
+					if (parsedData.type === 'cmd' && parsedData.data === 'clear') {
+						this.msgHistory.length = 0; // clear chat history
+						console.log('Chat history cleared.');
+						return; // Command processed, no further action needed
+					} else if (parsedData.type === 'text' && typeof parsedData.text === 'string') {
+						text = parsedData.text;
+						console.log('>> Received text from client:', text);
+						// Optionally, send transcription confirmation back to client if needed
+						// ws.send(JSON.stringify({ type: 'text', text: `Server received: ${text}` }));
+					} else {
+						console.warn('Received unhandled string message type or format:', event.data);
+						return;
+					}
+				} catch (e) {
+					console.error('Failed to parse string message or unknown format:', event.data, e);
+					return;
 				}
-				return; // end processing here for this event type
-			}
-
-			// transcribe audio buffer to text (stt) using Deepgram Nova
-			const { result: transcriptionResult, error } = await deepgram.listen.prerecorded.transcribeFile(
-				// Convert ArrayBuffer to Buffer for Deepgram
-				Buffer.from(event.data as ArrayBuffer),
-				{
-					model: 'nova-3',
-					smart_format: true,
-					language: 'en',
-				}
-			);
-
-			if (error) {
-				console.error('Deepgram transcription error:', error);
+			} else {
+				// Assuming client now only sends stringified JSON (text or commands)
+				console.warn('Received unexpected binary message from client. Ignoring.');
 				return;
 			}
 
-			const text = transcriptionResult?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
-			console.log('>>', text);
-			ws.send(JSON.stringify({ type: 'text', text })); // send transcription to client
+			if (!text) {
+				// If text is empty (e.g. after a clear command or if it was an unhandled message type), do not proceed.
+				return;
+			}
+
+			// Add received text to message history
 			this.msgHistory.push({ role: 'user', content: text });
 
-			// run inference
+			// Run inference with Google Generative AI
 			const result = streamText({
 				model: google('gemini-2.0-flash-lite'),
 				system: 'You in a voice conversation with the user',
