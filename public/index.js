@@ -165,7 +165,7 @@ window.Module = {
     print: whisperPrint,
     printErr: whisperPrint, // Redirect errors to the same handler for now
     onRuntimeInitialized: function() {
-        console.log("WASM Runtime: Initialized.");
+        console.error("WASM RUNTIME INITIALIZED: Module.onRuntimeInitialized has been CALLED!"); // Use console.error for visibility
         isWasmRuntimeInitialized = true;
         let instanceInitQueued = false;
         let modelPathForQueuedInit = null;
@@ -206,7 +206,7 @@ window.Module = {
         });
 
         if (instanceInitQueued && modelReadyForInstanceInit) {
-            console.log("WASM Runtime: Processing queued 'init_instance' for", modelPathForQueuedInit);
+            console.log("WASM Runtime: Processing queued 'init_instance'. model_whisper (VFS path for Module.init):", modelPathForQueuedInit);
             if (window.Module.init) {
                 window.instance = Module.init(modelPathForQueuedInit);
                 if (window.instance) {
@@ -225,7 +225,14 @@ window.Module = {
         }
 
         queuedFileOperations = [];
-        console.log("WASM Runtime: Finished processing queued operations.");
+        console.log("WASM Runtime: Finished processing all queued operations in onRuntimeInitialized.");
+        if (!window.instance && instanceInitQueued && !modelReadyForInstanceInit) {
+            console.error("WASM Runtime: Instance initialization was queued but model was not ready. Transcription will likely fail until model is reloaded or this is resolved.");
+        } else if (!window.instance && instanceInitQueued && modelReadyForInstanceInit) {
+            console.error("WASM Runtime: Instance initialization was queued and model was ready, but Module.init might have failed silently or instance not set.");
+        } else if (window.instance) {
+            console.log("WASM Runtime: Whisper instance should now be initialized:", window.instance);
+        }
     },
     setStatus: function(text) {
         if (text.includes("Downloading data...")) {
@@ -543,8 +550,8 @@ function processCollectedAudio() {
     if (!window.instance) {
         if (isWasmRuntimeInitialized && modelReadyForInstanceInit && window.Module && window.Module.init) {
             setStatus("Initializing Whisper instance...");
-            console.log("Whisper: Initializing instance with VFS model path:", model_whisper);
-            window.instance = Module.init(model_whisper); // model_whisper is 'whisper.bin'
+            console.log("Whisper: processCollectedAudio - Attempting direct Module.init(). model_whisper (VFS path):", model_whisper);
+            window.instance = Module.init(model_whisper);
             if (window.instance) {
                 setStatus("Whisper initialized. Ready to transcribe.");
                 console.log("Whisper: Instance initialized successfully:", window.instance);
@@ -556,7 +563,7 @@ function processCollectedAudio() {
             }
         } else {
             setStatus("Whisper engine not ready or model not in VFS. Queuing instance init.");
-            console.log("Whisper: Conditions not met for immediate init. isWasmRuntimeInitialized:", isWasmRuntimeInitialized, "modelReadyForInstanceInit:", modelReadyForInstanceInit, "window.Module.init exists:", !!(window.Module && window.Module.init));
+            console.log("Whisper: processCollectedAudio - Deferring Module.init(). Conditions: isWasmRuntimeInitialized:", isWasmRuntimeInitialized, "modelReadyForInstanceInit:", modelReadyForInstanceInit, "Module.init exists:", !!(window.Module && window.Module.init), "model_whisper:", model_whisper);
 
             if (!queuedFileOperations.find(op => op.operation === 'init_instance')) {
                  console.log("Whisper: Queuing 'init_instance' operation for model path:", model_whisper);
