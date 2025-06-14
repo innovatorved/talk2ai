@@ -15,10 +15,18 @@ export async function vad(onAudioBuffer, onStatus) {
 			case 'info':
 				onStatus(data.message);
 				break;
-			default:
-				const buff = float32ArraysToWav([data.buffer], SAMPLE_RATE);
-				// playAudioBuffer(buff);
-				onAudioBuffer(buff);
+			default: // This handles the audio data
+                // const buff = float32ArraysToWav([data.buffer], SAMPLE_RATE); // OLD CODE
+                // playAudioBuffer(buff); // OLD CODE
+
+                // NEW CODE: Pass the Float32Array directly
+                if (data.buffer instanceof Float32Array) {
+                    onAudioBuffer(data.buffer);
+                } else {
+                    console.error("VAD: Received buffer is not a Float32Array. Actual type:", data.buffer?.constructor?.name, "Data:", data.buffer);
+                    // Optionally, try to convert or handle error
+                    // For now, just log and don't call onAudioBuffer if type is unexpected
+                }
 				break;
 		}
 	};
