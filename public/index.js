@@ -22,17 +22,19 @@ window.visualizationIntervalId = undefined;
 
 window.connectWebSocket = function () {
 	if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-		console.log('WebSocket already open or connecting.');
+		console.log('WebSocket: Already open or connecting.');
 		return;
 	}
+	console.log('WebSocket: Attempting to connect...');
 	socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/websocket`);
 
 	socket.onopen = () => {
-		console.log('WebSocket connection established.');
+		console.log('WebSocket: Connection opened.');
 		setStatus(vadInitialized ? 'Listening...' : 'Ready to initialize VAD.');
 	};
 
 	socket.onmessage = async (event) => {
+		console.log("WebSocket: Message received from server:", event.data);
 		const data = JSON.parse(event.data);
 		switch (data.type) {
 			case 'audio': // ai's response
@@ -49,12 +51,12 @@ window.connectWebSocket = function () {
 	};
 
 	socket.onerror = (error) => {
-		console.error('WebSocket Error:', error);
+		console.error('WebSocket: Error:', error);
 		setStatus('Connection error. Try refreshing.');
 	};
 
 	socket.onclose = (event) => {
-		console.log('WebSocket connection closed:', event.reason);
+		console.log('WebSocket: Connection closed. Reason:', event.reason, "Code:", event.code);
 		if (conversationActive) {
 			setStatus('Connection lost. Please Stop and Start again.');
 		} else {
@@ -90,31 +92,30 @@ window.initializeVADSystem = async function () {
 
 	// Collects audio chunks from VAD
 	function onAudioBuffer(buff) {
+        console.log("VAD: Audio buffer received, length:", buff.length);
         if (buff.length > 0) {
             currentAudioBuffer.push(buff);
+            console.log("VAD: Pushing audio chunk to currentAudioBuffer. currentAudioBuffer length now:", currentAudioBuffer.length);
         }
 	}
 
 	// Handles VAD status changes, triggers transcription on speech end
 	function onVADStatus(status) {
+        console.log("VAD: Status changed to:", status);
 		if (conversationActive) setStatus(`VAD: ${status}`);
 		// Trigger transcription when VAD detects end of speech (e.g., "INACTIVE" or "SILENCE" after "VOICE")
-        // We need a more robust way to detect end of speech segment for transcription.
-        // For now, let's assume "INACTIVE" after "VOICE" is the trigger.
-        // A state machine (e.g., IDLE -> VOICE_ACTIVE -> AWAITING_TRANSCRIPTION) might be better.
         if (window.vadState === "VOICE" && (status === "SILENCE" || status === "INACTIVE")) {
-            console.log("VAD inactive after voice, processing audio.");
+            console.log("VAD: End of speech detected. Calling processCollectedAudio.");
             processCollectedAudio();
         }
         window.vadState = status; // Store current VAD state
 	}
 
 	try {
-		// Pass WHISPER_SAMPLE_RATE to VAD initialization if it accepts sample rate,
-		// otherwise ensure VAD is configured for 16kHz. Assuming VAD defaults to or is set to 16kHz.
+        console.log("VAD: Initializing with sample rate", WHISPER_SAMPLE_RATE + "...");
 		await vad(onAudioBuffer, onVADStatus, WHISPER_SAMPLE_RATE); // Initialize VAD
 		vadInitialized = true;
-		console.log('VAD initialized successfully.');
+		console.log('VAD: Initialized successfully.');
 		setStatus('Listening...');
 		return true;
 	} catch (error) {
@@ -132,28 +133,27 @@ window.initializeVADSystem = async function () {
 // For Whisper status messages, it uses setStatus.
 // For actual transcription results, it sends to UI and WebSocket.
 function whisperPrint(text) {
+    console.log("WhisperModuleOutput:", text);
     if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
-    console.log("Whisper output: " + text);
+    // console.log("Whisper output: " + text); // Redundant with the above
 
-    // Heuristic to distinguish transcription from status messages
-    // This needs to be robust. Whisper.cpp main example calls Module.print with the transcribed text.
-    // Progress/status messages are often prefixed or structured differently.
-    // Example whisper output: "whisper_full_with_state: progress = 100% (XXXXms)" or the actual text.
-    // Let's assume if it's not a typical status line from whisper.cpp, it's transcription.
-    const isLikelyStatus = text.startsWith('[') || text.startsWith('whisper_') || text.includes('progress =') || text.includes('time =');
+    const isLikelyStatus = text.startsWith('[') || text.startsWith('whisper_') || text.includes('progress =') || text.includes('time =') || text.startsWith('js: ') || text.startsWith('main: ');
 
     if (isLikelyStatus) {
-        // You could show detailed Whisper progress if desired:
+        console.log("WhisperModuleOutput: Detected as status/progress message.");
         // setStatus("Whisper: " + text.substring(0, 70) + "...");
-        console.log("Whisper status/progress: " + text);
     } else if (text.trim().length > 0 && window.instance) {
-        // Assuming this is the transcribed text
         const transcribedText = text.trim();
+        console.log("WhisperModuleOutput: Detected as transcription. Text:", transcribedText);
+
+        console.log("WhisperModuleOutput: Displaying in UI:", transcribedText);
         printSpeach(transcribedText, 'user');
+
         if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'text', text: text.trim() }));
+            console.log("WhisperModuleOutput: Sending to WebSocket:", transcribedText);
+            socket.send(JSON.stringify({ type: 'text', text: transcribedText }));
         } else {
-            console.warn('WebSocket not open. Cannot send transcribed text.');
+            console.warn('WhisperModuleOutput: WebSocket not open, cannot send.');
             setStatus('Connection issue. Cannot send transcription.');
         }
         setStatus('Listening...'); // Reset status after transcription
@@ -164,18 +164,16 @@ window.Module = {
     print: whisperPrint,
     printErr: whisperPrint, // Redirect errors to the same handler for now
     onRuntimeInitialized: function() {
-        console.log("Whisper.wasm runtime initialized.");
+        console.log("WASM Runtime: Initialized.");
         isWasmRuntimeInitialized = true;
-        // Process any queued file operations or initializations
         queuedFileOperations.forEach(op => {
             if (op.operation === 'store') {
-                console.log(`Processing queued FS operation for ${op.fname}`);
-                // Ensure Module.FS is available now
+                console.log("WASM Runtime: Processing queued 'store' for", op.fname);
                 if (window.Module.FS_unlink && window.Module.FS_createDataFile) {
                     try { window.Module.FS_unlink(op.fname); } catch (e) { /* ignore */ }
                     window.Module.FS_createDataFile("/", op.fname, op.buf, true, true);
+                    console.log("WASM Runtime: Queued store for", op.fname, "completed.");
 
-                    // The rest of the original storeFS logic that happens *after* FS operations
                     model_whisper = op.fname;
                     document.getElementById('model-whisper-status').innerHTML = `Loaded: ${model_name_ggml} (as ${op.fname})`;
                     setStatus(`Model ${model_name_ggml} loaded.`);
@@ -190,30 +188,29 @@ window.Module = {
                     document.getElementById('model-whisper-status').innerHTML = 'Model: ' + model_name_ggml;
 
                 } else {
-                    console.error("Module.FS methods not available even after onRuntimeInitialized.");
+                    console.error("WASM Runtime: Error - FS methods still not available in onRuntimeInitialized for 'store'.");
                     setStatus("Error: Could not save model to WASM FS.");
                 }
             } else if (op.operation === 'init_instance') {
-                console.log("Processing queued Whisper instance initialization with model: " + op.modelPath);
+                console.log("WASM Runtime: Processing queued 'init_instance' for", op.modelPath);
                 if (window.Module.init) {
                     window.instance = Module.init(op.modelPath);
                     if (window.instance) {
+                        console.log("WASM Runtime: Queued instance init for", op.modelPath, "completed. Instance:", window.instance);
                         setStatus("Whisper initialized (deferred). Ready to transcribe.");
-                        console.log("Whisper instance initialized (deferred): ", window.instance);
                     } else {
                         setStatus("Error initializing Whisper (deferred).");
                         console.error("Failed to initialize Whisper instance (deferred).");
                     }
                 } else {
-                     console.error("Module.init not available even after onRuntimeInitialized for queued init.");
+                     console.error("WASM Runtime: Error - Module.init still not available in onRuntimeInitialized for 'init_instance'.");
                      setStatus("Error: Could not initialize Whisper instance (deferred).");
                 }
             }
         });
-        queuedFileOperations = []; // Clear the queue
+        queuedFileOperations = [];
     },
     setStatus: function(text) {
-        // Filter out or reformat common Emscripten/Wasm status messages
         if (text.includes("Downloading data...")) {
             // This is handled by cbProgress
         } else if (text.includes("prepare time") || text.includes("load time")) {
@@ -239,15 +236,15 @@ function convertTypedArray(src, type) {
 // Function to store model in WASM FS and update UI
 function storeFS(fname, buf) {
     if (isWasmRuntimeInitialized && window.Module && window.Module.FS_createDataFile && window.Module.FS_unlink) {
-        console.log(`storeFS: Runtime initialized. Storing ${fname} directly.`);
+        console.log("storeFS: Storing", fname, "directly.");
         try { window.Module.FS_unlink(fname); } catch (e) { /* ignore */ }
         window.Module.FS_createDataFile("/", fname, buf, true, true);
+        console.log("storeFS: Successfully stored", fname, "in VFS.");
 
-        // Original UI updates and logging from storeFS
         model_whisper = fname;
         document.getElementById('model-whisper-status').innerHTML = `Loaded: ${model_name_ggml} (as ${fname})`;
         setStatus(`Model ${model_name_ggml} loaded.`);
-        console.log('storeFS: stored model: ' + fname + ' (original: ' + model_name_ggml + ') size: ' + buf.length);
+        // console.log('storeFS: stored model: ' + fname + ' (original: ' + model_name_ggml + ') size: ' + buf.length); // Already logged above effectively
 
         const modelButtons = ['fetch-whisper-tiny-en', 'fetch-whisper-tiny', 'fetch-whisper-base-en', 'fetch-whisper-base', 'fetch-whisper-tiny-en-q5_1', 'fetch-whisper-tiny-q5_1', 'fetch-whisper-base-en-q5_1', 'fetch-whisper-base-q5_1'];
         modelButtons.forEach(id => {
@@ -258,41 +255,40 @@ function storeFS(fname, buf) {
         document.getElementById('model-whisper-status').innerHTML = 'Model: ' + model_name_ggml;
 
     } else {
-        console.log(`storeFS: Runtime not yet initialized. Queuing FS operation for ${fname}.`);
+        console.log("storeFS: Queued store operation for", fname);
         queuedFileOperations.push({ operation: 'store', fname, buf });
-        // UI updates indicating loading might still be useful here,
-        // but the "Loaded" status will be set by onRuntimeInitialized.
         document.getElementById('model-whisper-status').innerHTML = `Model ${model_name_ggml} downloaded, waiting for WASM FS...`;
     }
 }
 
-// Function to load a model file selected by user
 window.loadFile = function(event, fname) {
+    console.log("UI: loadFile called for local file. Target VFS name:", fname);
     var file = event.target.files[0] || null;
     if (file == null) return;
 
-    model_name_ggml = file.name; // Store the original model name for display
+    model_name_ggml = file.name;
     setStatus(`Loading model: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
     console.log("loadFile: loading model: " + file.name + ", size: " + file.size + " bytes. Please wait...");
 
     var reader = new FileReader();
     reader.onload = function(e) {
         var buf = new Uint8Array(e.target.result);
-        storeFS(fname, buf); // fname is 'whisper.bin'
+        storeFS(fname, buf);
     }
     reader.readAsArrayBuffer(file);
 }
 
-// Callback for fetch progress
 window.cbProgress = function(p) {
     let el = document.getElementById('fetch-whisper-progress');
+    const progressPercent = Math.round(100 * p);
     if (el) {
-        el.innerHTML = `${model_name_ggml}: ` + Math.round(100 * p) + '%';
+        el.innerHTML = `${model_name_ggml}: ` + progressPercent + '%';
     }
+    console.log("UI: Model fetch progress for", model_name_ggml, ":", progressPercent + '%');
 }
 
-// Callback for fetch cancellation
 window.cbCancel = function() {
+    console.log("UI: Model load cancelled/failed for", model_name_ggml);
     const modelButtons = ['fetch-whisper-tiny-en', 'fetch-whisper-tiny', 'fetch-whisper-base-en', 'fetch-whisper-base', 'fetch-whisper-tiny-en-q5_1', 'fetch-whisper-tiny-q5_1', 'fetch-whisper-base-en-q5_1', 'fetch-whisper-base-q5_1'];
     modelButtons.forEach(id => {
         const btn = document.getElementById(id);
@@ -304,10 +300,8 @@ window.cbCancel = function() {
     setStatus("Model loading cancelled or failed.");
 }
 
-// Load a remote model
 window.loadWhisper = function(model) {
-    // These URLs should ideally point to your own server or a reliable CDN where you host the models.
-    // Using ggerganov's URLs directly might be subject to rate limits or changes.
+    console.log("UI: loadWhisper called for model:", model);
     let urls = {
         'tiny.en':  'https://whisper.ggerganov.com/ggml-model-whisper-tiny.en.bin',
         'tiny':     'https://whisper.ggerganov.com/ggml-model-whisper-tiny.bin',
@@ -356,12 +350,13 @@ window.loadWhisper = function(model) {
 // loadRemote (from helpers.js, adapted to use global whisperPrint and status functions)
 function loadRemote(url, dst, size_mb, cbProgress, cbReady, cbCancel, cbPrint) {
     if (!indexedDB) {
-        cbPrint("IndexedDB not supported. Model caching disabled.");
-        // Fallback to direct fetch without caching if necessary, or error out
-        // For simplicity, we'll rely on IndexedDB for now.
-        fetchRemote(url, cbProgress, cbPrint).then(data => {
+        // cbPrint is whisperPrint, which logs to console
+        whisperPrint("IndexedDB not supported. Model caching disabled.");
+        fetchRemote(url, cbProgress, whisperPrint).then(data => {
             if (data) {
-                cbReady(dst, data);
+                // cbReady is storeFS
+                console.log("UI: Model data fetched (no cache for)", url, ". Calling storeFS for", dst);
+                storeFS(dst, data);
             } else {
                 cbCancel();
             }
@@ -370,10 +365,10 @@ function loadRemote(url, dst, size_mb, cbProgress, cbReady, cbCancel, cbPrint) {
     }
 
     if (!navigator.storage || !navigator.storage.estimate) {
-        cbPrint('navigator.storage.estimate() is not supported');
+        whisperPrint('navigator.storage.estimate() is not supported');
     } else {
         navigator.storage.estimate().then(function (estimate) {
-            cbPrint('Storage quota: ' + estimate.quota + ' bytes, Usage: ' + estimate.usage + ' bytes');
+            whisperPrint('Storage quota: ' + estimate.quota + ' bytes, Usage: ' + estimate.usage + ' bytes');
         });
     }
 
@@ -383,16 +378,14 @@ function loadRemote(url, dst, size_mb, cbProgress, cbReady, cbCancel, cbPrint) {
         var db = event.target.result;
         if (!db.objectStoreNames.contains('models')) {
             db.createObjectStore('models', { autoIncrement: false });
-            cbPrint('Created IndexedDB ' + db.name + ' version ' + db.version + " with 'models' store.");
+            whisperPrint('Created IndexedDB ' + db.name + ' version ' + db.version + " with 'models' store.");
         }
     };
 
     rq.onsuccess = function (event) {
         var db = event.target.result;
         if (!db.objectStoreNames.contains('models')) {
-            cbPrint("Error: 'models' object store not found after DB open. DB version: " + db.version);
-            //This might happen if onupgradeneeded didn't fire as expected (e.g. version didn't change)
-            //Attempt a re-open or manual creation if robust error handling is needed
+            whisperPrint("Error: 'models' object store not found after DB open. DB version: " + db.version);
             cbCancel();
             return;
         }
@@ -402,10 +395,11 @@ function loadRemote(url, dst, size_mb, cbProgress, cbReady, cbCancel, cbPrint) {
 
         getRq.onsuccess = function (event) {
             if (getRq.result) {
-                cbPrint('"' + url + '" found in IndexedDB. Loading from cache.');
-                cbReady(dst, getRq.result);
+                whisperPrint('"' + url + '" found in IndexedDB. Loading from cache.');
+                console.log("UI: Model data fetched/found in cache for", url, ". Calling storeFS for", dst);
+                storeFS(dst, getRq.result); // cbReady is storeFS
             } else {
-                cbPrint('"' + url + '" not in IndexedDB. Attempting to fetch...');
+                whisperPrint('"' + url + '" not in IndexedDB. Attempting to fetch...');
                 if (!confirm(
                     'Download ' + size_mb + ' MB model: ' + model_name_ggml + '?\n' +
                     'Cached in browser for future use.')) {
@@ -413,53 +407,53 @@ function loadRemote(url, dst, size_mb, cbProgress, cbReady, cbCancel, cbPrint) {
                     db.close();
                     return;
                 }
-                fetchRemote(url, cbProgress, cbPrint).then(function (data) {
+                fetchRemote(url, cbProgress, whisperPrint).then(function (data) {
                     if (data) {
                         var putTx = db.transaction(['models'], 'readwrite');
                         var putOs = putTx.objectStore('models');
                         try {
                             var putRq = putOs.put(data, url);
                             putRq.onsuccess = function (event) {
-                                cbPrint('"' + url + '" stored in IndexedDB.');
-                                cbReady(dst, data);
+                                whisperPrint('"' + url + '" stored in IndexedDB.');
+                                console.log("UI: Model data fetched (and stored in cache) for", url, ". Calling storeFS for", dst);
+                                storeFS(dst, data); // cbReady is storeFS
                             };
                             putRq.onerror = function (event) {
-                                cbPrint('Failed to store "' + url + '" in IndexedDB: ' + event.target.error);
+                                whisperPrint('Failed to store "' + url + '" in IndexedDB: ' + event.target.error);
                                 cbCancel();
                             };
                         } catch (e) {
-                            cbPrint('Error storing "' + url + '" in IndexedDB: ' + e);
+                            whisperPrint('Error storing "' + url + '" in IndexedDB: ' + e);
                             cbCancel();
                         } finally {
                             putTx.oncomplete = () => db.close();
                         }
                     } else {
-                         cbCancel(); // fetchRemote failed
+                         cbCancel();
                          db.close();
                     }
                 }).catch(err => {
-                    cbPrint("FetchRemote error: " + err);
+                    whisperPrint("FetchRemote error: " + err);
                     cbCancel();
                     db.close();
                 });
             }
         };
         getRq.onerror = function (event) {
-            cbPrint('Failed to get data from IndexedDB: ' + event.target.error);
+            whisperPrint('Failed to get data from IndexedDB: ' + event.target.error);
             cbCancel();
             db.close();
         };
-         tx.oncomplete = () => { if (getRq.result === undefined) { /* only close if not already closed by putTx */ } else { db.close(); } };
-         tx.onerror = () => db.close(); // Ensure DB is closed on tx error
+         tx.oncomplete = () => { if (getRq.result === undefined) {} else { db.close(); } };
+         tx.onerror = () => db.close();
     };
     rq.onerror = function (event) {
-        cbPrint('Failed to open IndexedDB: ' + event.target.error);
+        whisperPrint('Failed to open IndexedDB: ' + event.target.error);
         cbCancel();
     };
 }
 
-// fetchRemote (from helpers.js)
-async function fetchRemote(url, cbProgress, cbPrint) {
+async function fetchRemote(url, cbProgress, cbPrint) { // cbPrint is whisperPrint
     cbPrint(`Downloading ${model_name_ggml} with fetch()...`);
     const response = await fetch(url, { method: 'GET' });
 
@@ -505,84 +499,88 @@ async function fetchRemote(url, cbProgress, cbPrint) {
 //    loadWhisper('tiny-en-q5_1');
 // });
 
-// Processes the collected audio buffers using Whisper
 function processCollectedAudio() {
+    console.log("Whisper: processCollectedAudio called.");
     if (currentAudioBuffer.length === 0) {
-        console.log("No audio collected, skipping transcription.");
+        console.log("Whisper: No audio in currentAudioBuffer to process.");
         return;
     }
 
     if (!model_whisper) {
+        console.log("Whisper: Model not loaded, cannot process audio.");
         setStatus("Whisper model not loaded. Please select and load a model.");
-        console.warn("Whisper model not loaded.");
-        currentAudioBuffer = []; // Clear buffer even if not processed
+        currentAudioBuffer = [];
         return;
     }
 
-    // Initialize Whisper instance if not already done (lazy initialization)
     if (!window.instance) {
         if (isWasmRuntimeInitialized && window.Module && window.Module.init) {
+            console.log("Whisper: Initializing instance with model:", model_whisper);
             setStatus("Initializing Whisper instance...");
-            console.log("Initializing Whisper instance with model: " + model_whisper);
             window.instance = Module.init(model_whisper);
             if (window.instance) {
+                console.log("Whisper: Instance initialized successfully:", window.instance);
                 setStatus("Whisper initialized. Ready to transcribe.");
-                console.log("Whisper instance initialized: ", window.instance);
             } else {
+                console.error("Whisper: Failed to initialize instance.");
                 setStatus("Error initializing Whisper. Please reload model or refresh.");
-                console.error("Failed to initialize Whisper instance.");
-                currentAudioBuffer = []; // Clear buffer on error
+                currentAudioBuffer = [];
                 return;
             }
         } else {
+            console.log("Whisper: Runtime not ready or Module.init not available. Queuing instance initialization for model:", model_whisper);
             setStatus("Whisper runtime not ready. Queuing instance initialization.");
-            console.log("Whisper runtime not ready. Queuing instance initialization for model: " + model_whisper);
-            // Ensure only one init_instance is queued or handle it idempotently
             if (!queuedFileOperations.find(op => op.operation === 'init_instance')) {
                  queuedFileOperations.push({ operation: 'init_instance', modelPath: model_whisper });
             }
-            // Don't proceed with transcription yet, it will be triggered after runtime init
-            // We might need to re-queue the audio processing itself or handle this flow differently.
-            // For now, let's just prevent transcription if runtime/instance is not ready.
-            currentAudioBuffer = []; // Clear buffer for now.
+            currentAudioBuffer = [];
             return;
         }
     }
 
-    // Concatenate all Float32Array chunks
-    let totalLength = 0;
-    currentAudioBuffer.forEach(chunk => totalLength += chunk.length);
-    const combinedAudio = new Float32Array(totalLength);
+    let totalLengthEstimate = 0;
+    currentAudioBuffer.forEach(chunk => totalLengthEstimate += chunk.length);
+    console.log("Whisper: Preparing to process collected audio. Number of chunks:", currentAudioBuffer.length, "Total estimated length (Float32Arrays):", totalLengthEstimate);
+
+    const combinedAudio = new Float32Array(totalLengthEstimate);
     let offset = 0;
     currentAudioBuffer.forEach(chunk => {
         combinedAudio.set(chunk, offset);
         offset += chunk.length;
     });
-    currentAudioBuffer = []; // Clear buffer for next speech input
-
-    console.log(`Processing ${combinedAudio.length / WHISPER_SAMPLE_RATE}s of audio.`);
-    setStatus("Transcribing with Whisper...");
+    console.log("Whisper: Combined audio buffer created. Length:", combinedAudio.length, "Type:", combinedAudio.constructor.name);
+    currentAudioBuffer = [];
 
     const lang = document.getElementById('language').value;
     const nthreads = parseInt(document.getElementById('threads').value, 10);
-    const translate = false; // We want transcription, not translation
+    const translate = false;
+    console.log("Whisper: Calling full_default. Language:", lang, "Threads:", nthreads, "Translate:", translate, "Audio length:", combinedAudio.length);
+    setStatus("Transcribing with Whisper...");
 
-    setTimeout(() => { // Run whisper in a timeout to allow UI to update
+    setTimeout(() => {
         try {
             const ret = Module.full_default(window.instance, combinedAudio, lang, nthreads, translate);
-            console.log('Whisper full_default call returned: ' + ret);
+            console.log('Whisper: full_default returned code:', ret);
             if (ret !== 0) {
                 setStatus("Whisper transcription error code: " + ret);
-                console.error("Whisper full_default failed with code: " + ret);
-                 // Re-enable listening or provide error feedback
+                console.error("Whisper: full_default failed with code: " + ret);
                 setStatus('Error during transcription. Listening...');
             }
-            // Transcription result is handled by whisperPrint (Module.print)
         } catch (e) {
-            console.error("Error during Whisper transcription:", e);
+            console.error("Whisper: Error during full_default call:", e);
             setStatus("Exception during transcription. Listening...");
         }
-    }, 10); // Small delay to ensure setStatus update is rendered
+    }, 10);
 }
 
+// Placeholder for handleStartConversation if it's meant to be in this file
+// Otherwise, it's typically in ui.js or similar.
+// window.handleStartConversation = async () => {
+//    console.log("UI: handleStartConversation called.");
+//    const vadReady = await initializeVADSystem();
+//    console.log("UI: VAD ready status:", vadReady);
+//    if (vadReady) {
+//        // Manage UI state (e.g., disable start, enable stop)
+//    }
+// };
 // -----------------------------------------------------------------------------
