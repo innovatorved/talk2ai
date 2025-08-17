@@ -6,7 +6,8 @@
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+		"fix": "npx biome format . --write"
 	},
 	"devDependencies": {
 		"@types/node": "^22.17.2",
