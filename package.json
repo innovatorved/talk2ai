@@ -9,13 +9,13 @@
 		"cf-typegen": "wrangler types"
 	},
 	"devDependencies": {
-		"@cloudflare/workers-types": "^4.20250319.0",
+		"@types/node": "^22.17.2",
 		"typescript": "^5.5.2",
 		"wrangler": "^4.2.0"
 	},
 	"dependencies": {
-		"ai": "^4.2.0",
-		"p-queue": "^8.1.0",
-		"workers-ai-provider": "^0.2.0"
+		"@ai-sdk/google": "^2.0.6",
+		"ai": "^5.0.0",
+		"p-queue": "^8.1.0"
 	}
 }

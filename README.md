@@ -1,6 +1,6 @@
 # talk2ai
 
-This is a real-time voice-based chat application that allows users to have spoken conversations with an AI built from first principles. The application uses client-side Voice Activity Detection (VAD) to capture user speech, Cloudflare Workers for backend processing, and Cloudflare AI for Speech-to-Text (STT), Large Language Model (LLM) inference, and Text-to-Speech (TTS).
+This is a real-time voice-based chat application that allows users to have spoken conversations with an AI built from first principles. The application uses client-side Voice Activity Detection (VAD) to capture user speech, Cloudflare Workers for backend processing, Deepgram for Speech-to-Text (STT), Cloudflare AI for Large Language Model (LLM) inference, and Cloudflare AI for Text-to-Speech (TTS).
 
 [🚀🚀🚀 Live Demo](https://talk2ai.conflare.workers.dev/)
 
@@ -11,7 +11,7 @@ This is a real-time voice-based chat application that allows users to have spoke
 - **Real-time Voice Interaction:** Speak directly to the AI and hear its responses.
 - **Client-Side VAD:** Efficiently detects speech, sending audio only when the user is talking.
 - **Streaming AI Responses:** AI responses are streamed back for a more interactive feel.
-- **Cloudflare Powered:** Leverages Cloudflare Workers for scalable backend logic and Cloudflare AI for cutting-edge AI models.
+- **Cloudflare Powered:** Leverages Cloudflare Workers for scalable backend logic and Cloudflare AI for cutting-edge LLM and TTS models.
 - **Chat History:** Maintains a conversation history within a session.
 - **Simple UI:** Clean interface displaying the conversation and providing controls.
 
@@ -64,9 +64,9 @@ The backend is built using a Cloudflare Worker that utilizes a Durable Object to
     - If the message is a **stringified JSON command** (e.g., `{ "type": "cmd", "data": "clear" }`), it processes the command (e.g., clears `this.msgHistory`).
     - If the message is an **audio buffer** (user's speech):
 3.  **Speech-to-Text (STT):**
-    - The audio buffer (an `ArrayBuffer`) is converted to a `Uint8Array`.
-    - This array is sent to the Cloudflare AI STT model (`@cf/openai/whisper-tiny-en`).
-    - The model transcribes the audio to text.
+    - The audio buffer (an `ArrayBuffer`) is a WAV PCM 16-bit mono at 16 kHz produced by the client VAD.
+    - The Worker posts the raw bytes to Deepgram's Pre-recorded API (`https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true`) with header `Authorization: Token <DEEPGRAM_API_KEY>` and `Content-Type: audio/wav`.
+    - Deepgram returns a JSON response; the transcript is read from `results.channels[0].alternatives[0].transcript`.
     - The transcribed text is sent back to the client via WebSocket (`{ type: 'text', text: user_transcription }`) so the user can see what the AI heard.
     - The user's transcribed text is added to the `msgHistory` array for context (`{ role: 'user', content: text }`).
 4.  **Large Language Model (LLM) Inference:**
@@ -86,7 +86,7 @@ The backend is built using a Cloudflare Worker that utilizes a Durable Object to
 
 ### Data Flow Summary
 
-User Speech → VAD (Client) → Audio Chunk → WebSocket → Durable Object (Backend) → STT Model → User Text Transcript (to Client & LLM) → LLM → AI Text Response Stream → Sentence Buffer → TTS Model → AI Audio Chunk → WebSocket → Client (Play Audio & Display Text)
+User Speech → VAD (Client) → Audio Chunk → WebSocket → Durable Object (Backend) → Deepgram STT → User Text Transcript (to Client & LLM) → LLM → AI Text Response Stream → Sentence Buffer → TTS Model → AI Audio Chunk → WebSocket → Client (Play Audio & Display Text)
 
 ## ⚙️ Setup & Running
 
@@ -97,10 +97,21 @@ npm install
 npm run dev
 ```
 
+### Secrets
+
+Set your Deepgram API key as a Worker secret so the backend can call the Deepgram API:
+
+```
+wrangler secret put DEEPGRAM_API_KEY
+```
+
+You can generate a key in your Deepgram dashboard. The Worker reads it via `env.DEEPGRAM_API_KEY`.
+
 ## ⚠️ Known Issues & Limitations
 
 - **LLM Context Window:** The `msgHistory` grows with the conversation. Long conversations might exceed the LLM's context window or token limits.
 - **Error Handling:** While some error handling is present, more robust mechanisms could be added (e.g., WebSocket reconnection logic).
+ - **STT Limits:** Deepgram pre-recorded API has request and duration limits; see Deepgram docs for details and rate limits.
 
 ## 🤝 Contributing
 
